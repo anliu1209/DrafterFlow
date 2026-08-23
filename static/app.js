@@ -11,7 +11,9 @@ let sourceFile = null;      // File / Blob currently in use
 let sourceUrl = null;       // object URL for the "原图" view
 let sourceName = '';
 let analysis = null;        // result of /api/analyze
-let currentView = 'original';
+let layerState = { base: true, relief: true };  // preview-only layer visibility
+let ringPlaced = null;      // {c:{x,y}, outer, inner} in mm, or null
+let holeToolActive = false;
 let stlBlob = null;
 let holeCenter = null;
 let committedSourceName = null;  // the source that produced the current STL
@@ -19,7 +21,7 @@ let pendingSource = null;        // {file, name} awaiting "switch image?" confir
 
 // ---------- three.js ----------
 let renderer, scene, camera, controls, modelGroup, grid;
-let baseMat = null, topMat = null;
+let baseMat = null, topMat = null, baseMesh = null, topMesh = null;
 
 function initThree() {
   const canvas = $('#threeCanvas');
@@ -130,14 +132,18 @@ function loadStl(blob, baseThickness) {
     }
 
     while (modelGroup.children.length) modelGroup.remove(modelGroup.children[0]);
+    baseMesh = null; topMesh = null;
     if (base.length) {
       baseMat = new THREE.MeshStandardMaterial({ color: baseHex(), roughness: 0.5, metalness: 0.06, flatShading: true });
-      modelGroup.add(new THREE.Mesh(makePartGeometry(base), baseMat));
+      baseMesh = new THREE.Mesh(makePartGeometry(base), baseMat);
+      modelGroup.add(baseMesh);
     }
     if (top.length) {
       topMat = new THREE.MeshStandardMaterial({ color: colorHex(), roughness: 0.5, metalness: 0.06, flatShading: true });
-      modelGroup.add(new THREE.Mesh(makePartGeometry(top), topMat));
+      topMesh = new THREE.Mesh(makePartGeometry(top), topMat);
+      modelGroup.add(topMesh);
     }
+    updateLayerVisibility();
 
     grid.visible = true;
     grid.position.y = (box.min.z - center.z) * s - 0.05;
@@ -157,31 +163,127 @@ function colorHex() { return $('#colorColor').value; }
 function onColorChange() {
   if (baseMat) baseMat.color.set(baseHex());
   if (topMat) topMat.color.set(colorHex());
+  const bs = document.querySelector('.swatch-base'), rs = document.querySelector('.swatch-relief');
+  if (bs) bs.style.background = baseHex();
+  if (rs) rs.style.background = colorHex();
   renderGauge();
   scheduleAnalyze();
 }
 
-// ---------- mask preview ----------
+// ---------- previews & layer visibility (preview-only for now) ----------
 const VIEW_SRC = { combined: 'combined_png', base: 'base_png', color: 'color_png' };
 
-function setSegActive() {
-  document.querySelectorAll('.seg').forEach((b) => {
-    b.classList.toggle('active', b.dataset.view === currentView);
-  });
+function updateLayerVisibility() {
+  layerState.base = $('#layerBaseEye').classList.contains('is-on');
+  layerState.relief = $('#layerReliefEye').classList.contains('is-on');
+  if (baseMesh) baseMesh.visible = layerState.base;
+  if (topMesh) topMesh.visible = layerState.relief;
 }
 
-function updateMaskView() {
-  const img = $('#maskImg');
-  const empty = $('#maskEmpty');
-  if (currentView === 'original') {
-    if (sourceUrl) { img.src = sourceUrl; img.hidden = false; empty.hidden = true; }
+function updateMaskPreview() {
+  const img = $('#maskImg'), empty = $('#maskEmpty');
+  let src = null;
+  if (analysis) {
+    src = layerState.base && layerState.relief ? analysis.combined_png
+      : layerState.base ? analysis.base_png
+      : layerState.relief ? analysis.color_png
+      : null;
+  }
+  if (src) { img.src = src; img.hidden = false; empty.hidden = true; }
+  else { img.src = ''; img.hidden = true; empty.hidden = true; }
+}
+
+function refreshLayerPanel() {
+  if (!analysis) return;
+  $('#layerBaseThumb').src = analysis.base_png; $('#layerBaseThumb').hidden = false;
+  $('#layerReliefThumb').src = analysis.color_png; $('#layerReliefThumb').hidden = false;
+}
+
+function onLayerToggle() {
+  this.classList.toggle('is-on');
+  this.setAttribute('aria-pressed', String(this.classList.contains('is-on')));
+  updateLayerVisibility();
+  updateMaskPreview();
+}
+
+// ---------- ring / hole tool ----------
+function pxScaleMm() {
+  const wh = Math.max(analysis.w_px, analysis.h_px);
+  return num($('#width')) / wh;
+}
+function pxToMm(nx, ny) {
+  const sc = pxScaleMm();
+  return { x: sc * (nx - analysis.w_px / 2), y: sc * (analysis.h_px / 2 - ny) };
+}
+function mmToPx(mx, my) {
+  const sc = pxScaleMm();
+  return { x: mx / sc + analysis.w_px / 2, y: analysis.h_px / 2 - my / sc };
+}
+// The placement <img> is letterboxed (object-fit: contain); return the rendered
+// content rect in client coords so clicks and the ring overlay map 1:1 to native px.
+function imgContentRect(img) {
+  const el = img.getBoundingClientRect();
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || !nh) return { x: el.x, y: el.y, w: el.width, h: el.height };
+  const scale = Math.min(el.width / nw, el.height / nh);
+  const w = nw * scale, h = nh * scale;
+  return { x: el.x + (el.width - w) / 2, y: el.y + (el.height - h) / 2, w, h };
+}
+
+function drawRing() {
+  const overlay = $('#ringOverlay');
+  if (!ringPlaced || !analysis) {
+    overlay.style.display = 'none';
     return;
   }
-  if (analysis && analysis[VIEW_SRC[currentView]]) {
-    img.src = analysis[VIEW_SRC[currentView]];
-    img.hidden = false;
-    empty.hidden = true;
-  }
+  const img = $('#maskImg');
+  const frame = $('#maskFrame').getBoundingClientRect();
+  const cr = imgContentRect(img);
+  overlay.style.left = (cr.x - frame.x) + 'px';
+  overlay.style.top = (cr.y - frame.y) + 'px';
+  overlay.style.width = cr.w + 'px';
+  overlay.style.height = cr.h + 'px';
+  overlay.setAttribute('viewBox', `0 0 ${analysis.w_px} ${analysis.h_px}`);
+  overlay.style.display = 'block';
+  const sc = pxScaleMm();
+  const p = mmToPx(ringPlaced.c.x, ringPlaced.c.y);
+  $('#ringOuterCircle').setAttribute('cx', p.x); $('#ringOuterCircle').setAttribute('cy', p.y);
+  $('#ringOuterCircle').setAttribute('r', ringPlaced.outer / sc);
+  $('#ringInnerCircle').setAttribute('cx', p.x); $('#ringInnerCircle').setAttribute('cy', p.y);
+  $('#ringInnerCircle').setAttribute('r', ringPlaced.inner / sc);
+}
+
+function fromRingInputs() {
+  if (!analysis) return;
+  const hx = $('#holeX').value, hy = $('#holeY').value, ro = $('#ringOuter').value;
+  if (hx === '' || hy === '') { ringPlaced = null; drawRing(); return; }
+  const inner = num($('#hole')) / 2;
+  ringPlaced = { c: { x: num($('#holeX')), y: num($('#holeY')) }, outer: ro ? num($('#ringOuter')) : inner + 2, inner };
+  drawRing();
+}
+
+function onMaskClick(evt) {
+  if (!holeToolActive || !analysis) return;
+  const img = $('#maskImg');
+  const cr = imgContentRect(img);
+  const nx = (evt.clientX - cr.x) * (analysis.w_px / cr.w);
+  const ny = (evt.clientY - cr.y) * (analysis.h_px / cr.h);
+  const c = pxToMm(nx, ny);
+  const inner = num($('#hole')) / 2;
+  const outer = $('#ringOuter').value ? num($('#ringOuter')) : inner + 2;
+  ringPlaced = { c, outer, inner };
+  $('#holeX').value = c.x.toFixed(2);
+  $('#holeY').value = c.y.toFixed(2);
+  $('#ringOuter').value = outer.toFixed(2);
+  drawRing();
+}
+
+function setHoleTool(active) {
+  holeToolActive = active;
+  const btn = $('#holeTool');
+  btn.classList.toggle('is-active', active);
+  btn.setAttribute('aria-pressed', String(active));
+  $('#maskFrame').classList.toggle('placement', active);
 }
 
 // ---------- cross-section gauge ----------
@@ -288,6 +390,9 @@ const I18N = {
     color_base: 'Base', color_relief: 'Relief', color_note: 'Preview colors — the real print color comes from your filament.',
     btn_generate: 'Generate STL', btn_download: 'Download STL',
     seg_original: 'Original', seg_layers: 'Layers', seg_base: 'Base', seg_relief: 'Relief',
+    orig_label: 'Original', orig_hint: 'reference', orig_toggle: '−',
+    tool_hole: 'Hole',
+    adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
     mask_empty: 'Upload a drawing to preview its layers', vp_empty: 'Your 3D model appears here', vp_hint: 'Rotate · zoom · pan', vp_reset: 'Reset view',
     how_eyebrow: 'Under the hood', how_title: 'How it works', how_sub: 'A drawing goes through a real geometry pipeline — computer vision to manufacturable mesh.',
     how1_t: 'Input image', how1_b: 'A transparent-background PNG with dark line work.',
@@ -345,6 +450,9 @@ const I18N = {
     color_base: '底板', color_relief: '浮雕', color_note: '预览用色——实际打印颜色取决于你的耗材。',
     btn_generate: '生成 STL', btn_download: '下载 STL',
     seg_original: '原图', seg_layers: '分层', seg_base: '底板', seg_relief: '浮雕',
+    orig_label: '原图', orig_hint: '参考', orig_toggle: '−',
+    tool_hole: '圆孔',
+    adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
     mask_empty: '上传图片以预览分层', vp_empty: '3D 模型会显示在这里', vp_hint: '旋转 · 缩放 · 平移', vp_reset: '重置视角',
     how_eyebrow: '底层原理', how_title: '它是怎么工作的', how_sub: '一张画会经过一条真实的几何流水线——从计算机视觉到可制造的网格。',
     how1_t: '输入图片', how1_b: '一张透明背景、深色线稿的 PNG。',
@@ -441,7 +549,8 @@ async function analyze() {
       ? t('solid_note')
       : t('dark_note').replace('{pct}', pct);
     $('#stageMeta').textContent = `${data.w_px} × ${data.h_px} ${t('px')} · ${note}`;
-    updateMaskView();
+    updateMaskPreview();
+    refreshLayerPanel();
   } catch (e) {
     setStatus(t('network_error') + e.message, 'err');
   }
@@ -456,7 +565,13 @@ async function generate() {
   fd.append('color', String(num($('#color'))));
   fd.append('hole', String(num($('#hole'))));
   const hx = $('#holeX').value.trim(), hy = $('#holeY').value.trim();
-  if (hx !== '' || hy !== '') { fd.append('hole_x', hx); fd.append('hole_y', hy); }
+  if (ringPlaced) {
+    fd.append('hole_x', ringPlaced.c.x.toFixed(2));
+    fd.append('hole_y', ringPlaced.c.y.toFixed(2));
+    fd.append('tab_outer_radius', ringPlaced.outer.toFixed(2));
+  } else if (hx !== '' || hy !== '') {
+    fd.append('hole_x', hx); fd.append('hole_y', hy);
+  }
   fd.append('dark_threshold', String(int($('#darkThreshold'))));
   fd.append('alpha_threshold', String(int($('#alphaThreshold'))));
 
@@ -549,9 +664,11 @@ function applySource(file, name) {
   sourceName = name;
   sourceUrl = URL.createObjectURL(file);
   analysis = null;
-  currentView = 'original';
-  setSegActive();
-  updateMaskView();
+  ringPlaced = null;
+  setHoleTool(false);
+  $('#originalImg').src = sourceUrl;
+  $('#originalPanel').hidden = false;
+  updateMaskPreview();
   $('#stageMeta').textContent = name;
   analyze();
 }
@@ -660,20 +777,26 @@ function init() {
   initTheme();
   initLanguage();
 
-  // view toggle
-  document.querySelectorAll('.seg').forEach((b) => {
-    b.addEventListener('click', () => {
-      currentView = b.dataset.view;
-      setSegActive();
-      updateMaskView();
-    });
+  // layers (PS-style, preview-only) + hole tool + original panel + ring inputs
+  $('#layerBaseEye').addEventListener('click', onLayerToggle);
+  $('#layerReliefEye').addEventListener('click', onLayerToggle);
+  $('#holeTool').addEventListener('click', () => setHoleTool(!holeToolActive));
+  $('#maskImg').addEventListener('click', onMaskClick);
+  $('#originalToggle').addEventListener('click', () => {
+    const body = $('#originalBody');
+    const collapsed = body.style.display === 'none';
+    body.style.display = collapsed ? '' : 'none';
+    $('#originalToggle').textContent = collapsed ? '−' : '+';
   });
+  $('#holeX').addEventListener('input', fromRingInputs);
+  $('#holeY').addEventListener('input', fromRingInputs);
+  $('#ringOuter').addEventListener('input', fromRingInputs);
 
   // params -> gauge
   bindPair('#width', '#widthRange', renderGauge);
   bindPair('#base', '#baseRange', renderGauge);
   bindPair('#color', '#colorRange', renderGauge);
-  bindPair('#hole', '#holeRange', renderGauge);
+  bindPair('#hole', '#holeRange', () => { renderGauge(); fromRingInputs(); });
 
   // thresholds -> re-analyze (debounced)
   bindPair('#darkThreshold', '#darkThresholdRange', scheduleAnalyze);

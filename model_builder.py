@@ -107,6 +107,7 @@ def build_model(
     color_thickness,
     hole_diameter,
     hole_position=None,
+    tab_outer_radius=None,
 ):
     """Return (final_mesh, hole_center_mm)."""
     scale = width_mm / max(w_px, h_px)
@@ -149,11 +150,15 @@ def build_model(
         hx, hy = hole_position
         if hx is None or hy is None:
             raise ModelBuildError("--hole-x and --hole-y must be given together.")
-        if not _hole_valid(base_union, color_union, hx, hy, hole_radius,
-                           DEFAULT_MIN_EDGE, clearance):
-            raise ModelBuildError(
-                "Unable to place keychain hole safely.\nPlease specify another hole position."
-            )
+        # Ring mode trusts the user's placement: the ring may deliberately extend past
+        # the silhouette to form a hang-tab, so the "must fit inside the base" check is
+        # skipped. A plain repositioned hole keeps the safety check.
+        if tab_outer_radius is None:
+            if not _hole_valid(base_union, color_union, hx, hy, hole_radius,
+                               DEFAULT_MIN_EDGE, clearance):
+                raise ModelBuildError(
+                    "Unable to place keychain hole safely.\nPlease specify another hole position."
+                )
     else:
         try:
             hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=clearance)
@@ -163,6 +168,17 @@ def build_model(
             if clearance is None:
                 raise
             hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=None)
+
+    # Ring/tab: a base-coloured outer cylinder fused at the hole centre. Where it lies
+    # inside the silhouette it is invisible after the union; where it crosses the edge
+    # the outside part becomes a protruding hang-tab (挂耳). The inner hole is cut below
+    # (its cylinder spans the full height), leaving a clean through-hole.
+    if tab_outer_radius is not None and tab_outer_radius > hole_radius:
+        tab = trimesh.creation.cylinder(
+            radius=tab_outer_radius, height=base_thickness, sections=64
+        )
+        tab.apply_translation([hx, hy, base_thickness / 2.0])
+        merged = trimesh.boolean.union([merged, tab], engine="manifold")
 
     total_height = base_thickness + color_thickness
     cylinder = trimesh.creation.cylinder(

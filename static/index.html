@@ -166,6 +166,12 @@
                 <input type="number" id="holeY" placeholder="Y mm" data-i18n-ph="hole_y_ph" step="0.5">
               </div>
             </div>
+            <div class="field">
+              <label class="field-label" for="ringOuter">
+                <span><span data-i18n="adv_ring">Hang-tab outer radius</span> <em class="hint" data-i18n="adv_ring_hint">ring outer edge; > hole radius makes a tab when it crosses the edge. leave blank = no tab</em></span>
+                <span class="field-value"><input type="number" id="ringOuter" placeholder="— mm" step="0.5" min="0"></span>
+              </label>
+            </div>
           </details>
         </section>
 
@@ -199,18 +205,50 @@
 
       <section class="stage">
         <div class="stage-head">
-          <div class="segmented" id="viewToggle" role="tablist">
-            <button class="seg active" data-view="original" data-i18n="seg_original">Original</button>
-            <button class="seg" data-view="combined" data-i18n="seg_layers">Layers</button>
-            <button class="seg" data-view="base" data-i18n="seg_base">Base</button>
-            <button class="seg" data-view="color" data-i18n="seg_relief">Relief</button>
+          <div class="layer-panel" id="layerPanel" role="group" aria-label="Layers">
+            <div class="layer-row" id="layerBase">
+              <img class="layer-thumb" id="layerBaseThumb" alt="Base layer" hidden>
+              <span class="layer-name"><span class="layer-swatch swatch-base"></span><span data-i18n="color_base">Base</span></span>
+              <button class="layer-eye is-on" id="layerBaseEye" type="button" aria-pressed="true" title="Toggle base visibility">
+                <svg class="eye-ico" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+                <svg class="eye-ico eye-ico-off" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.8"/></svg>
+              </button>
+            </div>
+            <div class="layer-row" id="layerRelief">
+              <img class="layer-thumb" id="layerReliefThumb" alt="Relief layer" hidden>
+              <span class="layer-name"><span class="layer-swatch swatch-relief"></span><span data-i18n="color_relief">Relief</span></span>
+              <button class="layer-eye is-on" id="layerReliefEye" type="button" aria-pressed="true" title="Toggle relief visibility">
+                <svg class="eye-ico" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+                <svg class="eye-ico eye-ico-off" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.8"/></svg>
+              </button>
+            </div>
           </div>
           <div class="stage-meta" id="stageMeta"></div>
         </div>
 
+        <div class="original-panel" id="originalPanel" hidden>
+          <div class="original-head">
+            <span class="original-title"><data-i18n="orig_label">Original</data-i18n> <em class="chip" data-i18n="orig_hint">reference</em></span>
+            <button class="original-toggle" id="originalToggle" type="button" data-collapse="1" aria-expanded="true" title="Collapse / expand">−</button>
+          </div>
+          <div class="original-body" id="originalBody">
+            <img id="originalImg" alt="Original image" draggable="false">
+          </div>
+        </div>
+
         <div class="mask-wrap">
+          <div class="toolbar" id="toolbar">
+            <button class="tool" id="holeTool" type="button" aria-pressed="false" title="Hole tool">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <span class="tool-label" data-i18n="tool_hole">Hole</span>
+            </button>
+          </div>
           <div class="checker mask-frame" id="maskFrame">
             <img id="maskImg" alt="Layer preview" draggable="false" hidden>
+            <svg class="ring-overlay" id="ringOverlay">
+              <circle id="ringOuterCircle" class="ring-outer" fill="rgba(255,62,62,0.06)" stroke="#ff3e3e" stroke-width="1.2" stroke-dasharray="4 3" />
+              <circle id="ringInnerCircle" class="ring-inner" fill="rgba(255,62,62,0)" stroke="#ff3e3e" stroke-width="1.6" />
+            </svg>
             <div class="empty" id="maskEmpty" data-i18n="mask_empty">Upload a drawing to preview its layers</div>
           </div>
         </div>

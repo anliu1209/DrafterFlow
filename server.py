@@ -186,6 +186,7 @@ async def generate(
     hole: str = Form("4"),
     hole_x: str | None = Form(None),
     hole_y: str | None = Form(None),
+    tab_outer_radius: str | None = Form(None),
     dark_threshold: str = Form("100"),
     alpha_threshold: str = Form("8"),
 ):
@@ -198,6 +199,7 @@ async def generate(
     base_th = _num(base, 1.2, "底板厚度")
     color_th = _num(color, 0.6, "深色层厚度")
     hole_d = _num(hole, 4.0, "孔直径")
+    tab_r = _num(tab_outer_radius, None, "挂耳半径") if tab_outer_radius not in (None, "") else None
     dark = _int(dark_threshold, 100, "深色阈值")
     alpha = _int(alpha_threshold, 8, "透明阈值")
 
@@ -205,6 +207,8 @@ async def generate(
     hy = _num(hole_y, None, "孔位 Y") if hole_y not in (None, "") else None
     if (hx is None) != (hy is None):
         raise HTTPException(422, "孔位 X / Y 需要同时填写，或同时留空。")
+    if tab_r is not None and hx is None:
+        raise HTTPException(422, "已启用挂耳（外环），请同时提供孔位 X / Y。")
 
     tmpdir = tempfile.mkdtemp(prefix="fog_")
     try:
@@ -224,6 +228,7 @@ async def generate(
                 color_thickness=color_th,
                 hole_diameter=hole_d,
                 hole_position=hole_position,
+                tab_outer_radius=tab_r,
             )
         except ImageProcessingError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)

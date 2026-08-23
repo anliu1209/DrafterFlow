@@ -512,6 +512,70 @@ input[type="range"]::-moz-range-thumb {
 }
 .vp-info b { color: var(--ink); }
 
+/* ---------------- layer panel (PS-style) ---------------- */
+.layer-panel { display: flex; flex-direction: column; gap: 4px; min-width: 172px; }
+.layer-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 5px 8px; min-width: 0;
+}
+.layer-thumb { width: 34px; height: 34px; border-radius: 5px; object-fit: contain; flex: 0 0 34px; }
+.layer-name { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-dim); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-swatch { width: 11px; height: 11px; border-radius: 3px; border: 1px solid var(--line-strong); flex: 0 0 auto; }
+.swatch-base { background: #c6bcab; }
+.swatch-relief { background: #e8a33d; }
+.layer-eye {
+  margin-left: auto; border: none; background: transparent; color: var(--ink-dim);
+  cursor: pointer; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; padding: 0;
+}
+.layer-eye:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.layer-eye .eye-ico { width: 18px; height: 18px; }
+.layer-eye .eye-ico-off { display: none; }
+.layer-eye:not(.is-on) .eye-ico { display: none; }
+.layer-eye:not(.is-on) .eye-ico-off { display: block; }
+.layer-eye:not(.is-on) { color: var(--ink-faint); opacity: .7; }
+
+/* ---------------- original mini panel ---------------- */
+.original-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow); overflow: hidden; }
+.original-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; }
+.original-title { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; }
+.original-title .chip { font-style: normal; }
+.original-toggle { border: none; background: transparent; color: var(--ink-dim); font-size: 15px; line-height: 1; cursor: pointer; width: 22px; height: 22px; border-radius: 5px; }
+.original-toggle:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.original-body { display: flex; justify-content: center; align-items: center; padding: 8px; }
+.original-body img { max-width: 100%; max-height: 130px; object-fit: contain; }
+
+/* ---------------- side toolbar + hole tool ---------------- */
+.mask-wrap { position: relative; }
+.toolbar {
+  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 6px; z-index: 3;
+}
+.tool {
+  position: relative; display: grid; place-items: center;
+  width: 34px; height: 34px; background: var(--surface); color: var(--ink-dim);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; padding: 0;
+  transition: all .12s ease;
+}
+.tool svg { width: 20px; height: 20px; }
+.tool-label {
+  position: absolute; left: 42px; top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-family: var(--mono); font-size: 11px;
+  background: var(--surface); border: 1px solid var(--line); padding: 3px 7px;
+  border-radius: var(--r-sm); color: var(--ink-dim); pointer-events: none;
+  opacity: 0; transition: opacity .12s ease;
+}
+.tool:hover { color: var(--ink); }
+.tool:hover .tool-label { opacity: 1; }
+.tool.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---------------- ring overlay (hole tool) ---------------- */
+.ring-overlay { display: none; position: absolute; pointer-events: none; }
+.ring-outer { fill: rgba(255, 62, 62, 0.06); stroke: #ff3e3e; stroke-width: 1.2; stroke-dasharray: 4 3; }
+.ring-inner { fill: rgba(255, 62, 62, 0); stroke: #ff3e3e; stroke-width: 1.6; }
+.mask-frame.placement { cursor: crosshair; }
+.mask-frame.placement img { cursor: crosshair; }
+
 /* ---------------- pipeline ---------------- */
 .pipeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
 .pipe-step {
