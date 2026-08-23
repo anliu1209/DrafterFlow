@@ -19,7 +19,7 @@ except Exception:  # scipy is a declared dep; keep Chaikin as a graceful fallbac
 
 MIN_AREA_PX = 4.0  # drop anti-aliasing specks smaller than ~2x2 px
 SMOOTH_ITERATIONS = 2  # Chaikin passes (fallback when scipy/spline is unavailable)
-SMOOTH_SIGMA = 2.0  # px. Gaussian-blur the mask BEFORE contour extraction so the
+SMOOTH_SIGMA = 1.0  # px. Gaussian-blur the mask BEFORE contour extraction so the
 # contour follows a smooth anti-aliased iso-boundary. Raise for smoother curves;
 # too high rounds sharp corners in line art and thins narrow strokes.
 SPLINE_SMOOTH = 0.03  # splprep smoothing criterion s, scaled by ring point count
