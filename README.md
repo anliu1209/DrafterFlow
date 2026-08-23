@@ -54,3 +54,10 @@ python3 -m venv .venv
 前端是纯静态页（`static/`，Three.js 3D 预览）+ 一个薄薄的 FastAPI 接口层（`server.py`），
 只负责把请求转发到现有的 `image_processing → vectorize → model_builder` 管道，管道本身不改。
 以后迁移到网页托管时，把 `server.py` 换成线上服务即可，管道与前端无需改动。
+
+## 致谢 / Acknowledgments
+
+- 矢量化（`vectorize.py`）的 **potrace 贝塞尔曲线**方案，参考了
+  [bekuto3d](https://github.com/LittleSound/bekuto3d)（MIT，© 2025-PRESENT Rizumu）。
+- 依赖 `potracer`（Potrace 的 Python 移植）为 **GPLv2+**；完整署名与许可条款见
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
