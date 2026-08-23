@@ -12,14 +12,22 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from shapely.validation import make_valid
 
 MIN_AREA_PX = 4.0  # drop anti-aliasing specks smaller than ~2x2 px
-SMOOTH_ITERATIONS = 2  # Chaikin corner-cutting passes to remove the pixel staircase
+SMOOTH_ITERATIONS = 2  # Chaikin corner-cutting passes, on top of the blur below
+SMOOTH_SIGMA = 1.0  # px. Gaussian-blur the mask BEFORE contour extraction so the
+# contour follows a smooth anti-aliased iso-boundary (removes the pixel staircase
+# that Chaikin alone leaves on shallow curves). Raise for smoother curves; too
+# high rounds sharp corners in line art and thins narrow strokes.
 
-# TODO(jaggies): Chaikin corner-cutting still leaves a faint staircase on shallow
-# curves. Try Gaussian-blurring the binary mask BEFORE contour extraction
-# (cv2.GaussianBlur -> threshold ~0.5 -> findContours) so the contour follows a
-# genuinely smooth anti-aliased boundary instead of raw pixels. Keep MIN_AREA_PX
-# filtering so blur doesn't leave stray specks. Compare against the current
-# corner-cutting path before switching.
+# NOTE on shrink: blurring contracts sharp convex corners slightly and narrows thin
+# strokes. model_builder clips color∩base so the dark layer can't overflow the
+# silhouette, but the hole margin/clearance are computed from these smoothed
+# polygons, so re-check find_hole_center after changing SMOOTH_SIGMA.
+
+
+def _blur_mask(m):
+    """Gaussian-blur a 0/1 mask and re-threshold at 0.5 into a smooth 0/1 mask."""
+    img = cv2.GaussianBlur(m.astype(np.float32) * 255.0, (0, 0), SMOOTH_SIGMA)
+    return (img > 127.0).astype(np.uint8)
 
 
 def _polygons_of(geom):
@@ -162,6 +170,7 @@ def base_polygons(base_mask):
     hollow line strokes, which is what a keychain needs.
     """
     m = (base_mask > 0).astype(np.uint8)
+    m = _blur_mask(m)
     contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     filled = np.zeros_like(m)
     cv2.drawContours(filled, contours, -1, 1, thickness=cv2.FILLED)
@@ -178,6 +187,7 @@ def base_polygons(base_mask):
 def color_polygons(color_mask):
     """Dark artwork, preserving holes (e.g. a frame ring + inner letters)."""
     m = (color_mask > 0).astype(np.uint8)
+    m = _blur_mask(m)
     contours, hierarchy = cv2.findContours(m, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if hierarchy is None or len(contours) == 0:
         return []
