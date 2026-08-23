@@ -2,6 +2,10 @@
 
 This project acknowledges and incorporates the following third-party software.
 
+The project itself is licensed under the **GNU General Public License v3**
+(see [LICENSE](LICENSE)) because it depends on the GPL-licensed `potracer`;
+GPLv3 is compatible with potracer's GPLv2+.
+
 ## bekuto3d (MIT)
 
 The potrace-based vectorization approach used in this project's `vectorize.py`

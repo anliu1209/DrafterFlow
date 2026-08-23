@@ -61,3 +61,13 @@ python3 -m venv .venv
   [bekuto3d](https://github.com/LittleSound/bekuto3d)（MIT，© 2025-PRESENT Rizumu）。
 - 依赖 `potracer`（Potrace 的 Python 移植）为 **GPLv2+**；完整署名与许可条款见
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 开源许可 / License
+
+本项目基于依赖 `potracer`（GPLv2+，copyleft），因此整个项目按
+**GNU General Public License v3（GPLv3）** 授权 —— 与 GPLv2+ 兼容，合规且不侵权。
+完整条款见 [LICENSE](LICENSE)。
+
+分发本项目时须以 GPL 兼容许可证发布源码；若你希望使用更宽松的许可，可将
+`potracer` 替换为宽松许可的矢量化方案（如 scikit-image 的亚像素 `find_contours`，
+BSD-3），届时本项目可改用 MIT 等宽松许可。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
