@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SketchForge — Turn your drawings into physical objects</title>
+<meta name="description" content="SketchForge turns 2D drawings and line art into manufacturable 3D relief models you can 3D print — no CAD experience required.">
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js", "three/addons/": "/static/vendor/" } }
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="brand" href="#top">
+    <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="9" width="14" height="10" rx="2" fill="currentColor" opacity="0.32"/>
+      <rect x="7" y="4" width="14" height="10" rx="2" fill="currentColor"/>
+    </svg>
+    <span class="brand-name">SketchForge</span>
+  </a>
+  <nav class="site-nav">
+    <a href="#how" data-i18n="nav_how">How it works</a>
+    <a href="#use" data-i18n="nav_use">What you can make</a>
+    <a href="#gallery" data-i18n="nav_gallery">Gallery</a>
+    <a href="#about" data-i18n="nav_about">About</a>
+  </nav>
+  <div class="header-actions">
+    <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">中文</button>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light / dark mode">
+      <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+    <a class="btn btn-primary" href="#forge" data-i18n="cta_create">Create a 3D model</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <p class="eyebrow" data-i18n="hero_eyebrow">2D drawing &rarr; 3D relief &rarr; physical object</p>
+    <h1 class="hero-title" data-i18n="hero_title">Turn your drawings into physical objects.</h1>
+    <p class="hero-sub" data-i18n="hero_sub">SketchForge transforms 2D drawings into manufacturable 3D models &mdash; no CAD experience required.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary btn-lg" href="#forge" data-i18n="cta_create">Create a 3D model</a>
+      <a class="btn btn-ghost btn-lg" href="#how" data-i18n="cta_how">How it works</a>
+    </div>
+
+    <div class="hero-visual">
+      <div class="hv-card">
+        <span class="hv-label" data-i18n="hv_drawing">Your drawing</span>
+        <div class="hv-frame checker"><img id="heroOriginal" alt="Example drawing" draggable="false"></div>
+      </div>
+      <div class="hv-arrow" aria-hidden="true">&rarr;</div>
+      <div class="hv-card">
+        <span class="hv-label" data-i18n="hv_layers">Detected layers</span>
+        <div class="hv-frame checker"><img id="heroLayers" alt="Detected base and relief layers" draggable="false"></div>
+      </div>
+      <div class="hv-arrow" aria-hidden="true">&rarr;</div>
+      <div class="hv-card hv-card--solid">
+        <span class="hv-label" data-i18n="hv_printable">Printable relief</span>
+        <div class="hv-chip">
+          <div class="hv-chip-stack">
+            <span class="hv-chip-bar hv-chip-bar--base"></span>
+            <span class="hv-chip-bar hv-chip-bar--relief"></span>
+          </div>
+          <div class="hv-chip-meta">
+            <span data-i18n="hv_base">1.2 mm base</span>
+            <span data-i18n="hv_relief">0.6 mm relief</span>
+          </div>
+        </div>
+        <p class="hv-note" data-i18n="hv_note">One STL, one filament swap.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FORGE (the tool) ============ -->
+  <section class="forge" id="forge">
+    <div class="forge-head">
+      <div>
+        <h2 class="forge-title" data-i18n="forge_title">Create your model</h2>
+        <p class="forge-sub" data-i18n="forge_sub">Upload a drawing with a transparent background and dark line work.</p>
+      </div>
+      <p class="forge-note" data-i18n="forge_note">No CAD experience required.</p>
+    </div>
+
+    <div class="forge-grid">
+      <aside class="rail">
+        <section class="card">
+          <h3 class="card-title"><span data-i18n="card_drawing">Drawing</span> <span class="card-num">01</span></h3>
+          <div class="dropzone" id="dropzone" role="button" tabindex="0">
+            <input type="file" id="fileInput" accept="image/png" hidden>
+            <div class="dz-inner">
+              <svg class="dz-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4m0 0L7 9m5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <p class="dz-main"><span data-i18n="drop_main">Drop your drawing here, or </span><span class="link" data-i18n="drop_choose">choose an image</span></p>
+              <p class="dz-hint" data-i18n="drop_hint">PNG · transparent background · dark line art</p>
+            </div>
+          </div>
+          <div class="examples" id="examples">
+            <span class="examples-label" data-i18n="examples_label">Examples</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title"><span data-i18n="card_dims">Dimensions</span> <span class="card-num">02</span></h3>
+
+          <div class="field">
+            <label class="field-label" for="width">
+              <span data-i18n="dim_width">Model width</span>
+              <span class="field-value"><input type="number" id="width" value="50" min="10" max="200" step="1"> mm</span>
+            </label>
+            <input type="range" id="widthRange" min="10" max="200" step="1" value="50">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="base">
+              <span><span data-i18n="dim_base">Base thickness</span> <em class="chip chip-base" data-i18n="chip_light">light</em></span>
+              <span class="field-value"><input type="number" id="base" value="1.2" min="0.4" max="8" step="0.2"> mm</span>
+            </label>
+            <input type="range" id="baseRange" min="0.4" max="8" step="0.2" value="1.2">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="color">
+              <span><span data-i18n="dim_relief">Relief thickness</span> <em class="chip chip-color" data-i18n="chip_dark">dark</em></span>
+              <span class="field-value"><input type="number" id="color" value="0.6" min="0.2" max="6" step="0.2"> mm</span>
+            </label>
+            <input type="range" id="colorRange" min="0.2" max="6" step="0.2" value="0.6">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="hole">
+              <span data-i18n="dim_hole">Keychain hole</span>
+              <span class="field-value"><input type="number" id="hole" value="4" min="2" max="12" step="0.5"> mm</span>
+            </label>
+            <input type="range" id="holeRange" min="2" max="12" step="0.5" value="4">
+          </div>
+
+          <details class="advanced">
+            <summary data-i18n="adv_summary">Advanced · thresholds &amp; hole position</summary>
+            <div class="field">
+              <label class="field-label" for="darkThreshold">
+                <span><span data-i18n="adv_dark">Dark threshold</span> <em class="hint" data-i18n="adv_dark_hint">pixels darker than this become relief</em></span>
+                <span class="field-value"><input type="number" id="darkThreshold" value="100" min="0" max="255" step="1"></span>
+              </label>
+              <input type="range" id="darkThresholdRange" min="0" max="255" step="1" value="100">
+            </div>
+            <div class="field">
+              <label class="field-label" for="alphaThreshold">
+                <span><span data-i18n="adv_alpha">Alpha threshold</span> <em class="hint" data-i18n="adv_alpha_hint">pixels more opaque than this become the base</em></span>
+                <span class="field-value"><input type="number" id="alphaThreshold" value="8" min="0" max="255" step="1"></span>
+              </label>
+              <input type="range" id="alphaThresholdRange" min="0" max="255" step="1" value="8">
+            </div>
+            <div class="field field--pair">
+              <label class="field-label" for="holeX">
+                <span><span data-i18n="adv_hole">Hole X / Y</span> <em class="hint" data-i18n="adv_hole_hint">leave blank to auto-place</em></span>
+              </label>
+              <div class="pair-inputs">
+                <input type="number" id="holeX" placeholder="X mm" data-i18n-ph="hole_x_ph" step="0.5">
+                <input type="number" id="holeY" placeholder="Y mm" data-i18n-ph="hole_y_ph" step="0.5">
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title"><span data-i18n="card_colors">Colors</span> <span class="card-num">03</span></h3>
+          <div class="color-row">
+            <label class="color-field">
+              <input type="color" id="baseColor" value="#c6bcab">
+              <span data-i18n="color_base">Base</span>
+            </label>
+            <label class="color-field">
+              <input type="color" id="colorColor" value="#e8a33d">
+              <span data-i18n="color_relief">Relief</span>
+            </label>
+          </div>
+          <p class="color-note" data-i18n="color_note">Preview colors &mdash; the real print color comes from your filament.</p>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title"><span data-i18n="card_section">Cross-section</span> <span class="card-num">04</span></h3>
+          <div class="gauge" id="gauge"></div>
+          <div class="gauge-readout" id="gaugeReadout"></div>
+        </section>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="generateBtn" data-i18n="btn_generate">Generate STL</button>
+          <button class="btn btn-ghost" id="downloadBtn" disabled data-i18n="btn_download">Download STL</button>
+        </div>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+      </aside>
+
+      <section class="stage">
+        <div class="stage-head">
+          <div class="segmented" id="viewToggle" role="tablist">
+            <button class="seg active" data-view="original" data-i18n="seg_original">Original</button>
+            <button class="seg" data-view="combined" data-i18n="seg_layers">Layers</button>
+            <button class="seg" data-view="base" data-i18n="seg_base">Base</button>
+            <button class="seg" data-view="color" data-i18n="seg_relief">Relief</button>
+          </div>
+          <div class="stage-meta" id="stageMeta"></div>
+        </div>
+
+        <div class="mask-wrap">
+          <div class="checker mask-frame" id="maskFrame">
+            <img id="maskImg" alt="Layer preview" draggable="false" hidden>
+            <div class="empty" id="maskEmpty" data-i18n="mask_empty">Upload a drawing to preview its layers</div>
+          </div>
+        </div>
+
+        <div class="viewport" id="viewport">
+          <canvas id="threeCanvas"></canvas>
+          <div class="vp-empty" id="vpEmpty">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+              <path d="M3 7l9 5 9-5M12 12v10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            </svg>
+            <p data-i18n="vp_empty">Your 3D model appears here</p>
+            <p class="vp-empty-hint" data-i18n="vp_hint">Rotate · zoom · pan</p>
+          </div>
+          <button class="vp-reset" id="resetView" hidden data-i18n="vp_reset">Reset view</button>
+          <div class="vp-info" id="vpInfo" hidden></div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="section" id="how">
+    <div class="section-head">
+      <p class="eyebrow" data-i18n="how_eyebrow">Under the hood</p>
+      <h2 class="section-title" data-i18n="how_title">How it works</h2>
+      <p class="section-sub" data-i18n="how_sub">A drawing goes through a real geometry pipeline &mdash; computer vision to manufacturable mesh.</p>
+    </div>
+    <ol class="pipeline">
+      <li class="pipe-step"><span class="pipe-num">01</span><div><h4 data-i18n="how1_t">Input image</h4><p data-i18n="how1_b">A transparent-background PNG with dark line work.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">02</span><div><h4 data-i18n="how2_t">Silhouette detection</h4><p data-i18n="how2_b">OpenCV separates the artwork from the background by alpha.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">03</span><div><h4 data-i18n="how3_t">Contour tracing</h4><p data-i18n="how3_b">Dark regions are traced into closed polygons.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">04</span><div><h4 data-i18n="how4_t">Geometry smoothing</h4><p data-i18n="how4_b">Corner-cutting removes the pixel staircase from curves.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">05</span><div><h4 data-i18n="how5_t">Relief generation</h4><p data-i18n="how5_b">Regions are extruded into a base plate plus a raised relief layer.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">06</span><div><h4 data-i18n="how6_t">Printability check</h4><p data-i18n="how6_b">A keychain hole is placed clear of the artwork with a safe margin.</p></div></li>
+      <li class="pipe-step"><span class="pipe-num">07</span><div><h4 data-i18n="how7_t">STL export</h4><p data-i18n="how7_b">One two-layer STL &mdash; print with a single filament swap at the base height.</p></div></li>
+    </ol>
+  </section>
+
+  <!-- ============ USE CASES ============ -->
+  <section class="section" id="use">
+    <div class="section-head">
+      <p class="eyebrow" data-i18n="use_eyebrow">Applications</p>
+      <h2 class="section-title" data-i18n="use_title">What can you make?</h2>
+    </div>
+    <div class="cards">
+      <div class="card use-card"><h4 data-i18n="use1_t">Art</h4><p data-i18n="use1_b">Turn drawings and illustrations into physical artwork.</p></div>
+      <div class="card use-card"><h4 data-i18n="use2_t">Education</h4><p data-i18n="use2_b">Turn students' drawings and designs into tangible objects.</p></div>
+      <div class="card use-card"><h4 data-i18n="use3_t">Tactile</h4><p data-i18n="use3_b">Explore turning visual artwork into raised, touchable forms.</p></div>
+      <div class="card use-card"><h4 data-i18n="use4_t">Prototyping</h4><p data-i18n="use4_b">Turn simple sketches into quick physical prototypes.</p></div>
+      <div class="card use-card"><h4 data-i18n="use5_t">Fan art</h4><p data-i18n="use5_b">Turn your favorite designs into physical keepsakes.</p></div>
+    </div>
+  </section>
+
+  <!-- ============ GALLERY ============ -->
+  <section class="section" id="gallery">
+    <div class="section-head">
+      <p class="eyebrow" data-i18n="gallery_eyebrow">Examples</p>
+      <h2 class="section-title" data-i18n="gallery_title">Made with SketchForge</h2>
+      <p class="section-sub" data-i18n="gallery_sub">A few outputs from the pipeline. Load one into the tool and see how it was built.</p>
+    </div>
+    <div class="gallery">
+      <figure class="gallery-item">
+        <div class="gallery-frame checker"><img src="/api/examples/txt" alt="Frame and text" draggable="false"></div>
+        <figcaption><span data-i18n="gal1_name">Frame &amp; text</span> <span class="gallery-type" data-i18n="gal1_type">line art · relief on base</span></figcaption>
+        <button class="btn btn-ghost btn-sm" data-example="txt" data-i18n="gallery_try">Try it &rarr;</button>
+      </figure>
+      <figure class="gallery-item">
+        <div class="gallery-frame checker"><img src="/api/examples/heart" alt="Heart" draggable="false"></div>
+        <figcaption><span data-i18n="gal2_name">Heart</span> <span class="gallery-type" data-i18n="gal2_type">solid silhouette</span></figcaption>
+        <button class="btn btn-ghost btn-sm" data-example="heart" data-i18n="gallery_try">Try it &rarr;</button>
+      </figure>
+      <figure class="gallery-item">
+        <div class="gallery-frame checker"><img src="/api/examples/qban" alt="Line art" draggable="false"></div>
+        <figcaption><span data-i18n="gal3_name">Line art</span> <span class="gallery-type" data-i18n="gal3_type">dense contours</span></figcaption>
+        <button class="btn btn-ghost btn-sm" data-example="qban" data-i18n="gallery_try">Try it &rarr;</button>
+      </figure>
+      <figure class="gallery-item gallery-item--placeholder">
+        <div class="gallery-frame gallery-frame--empty" data-i18n="gallery_ph">Your drawing here</div>
+        <figcaption data-i18n="gallery_ph_cap">Community submissions &mdash; coming soon</figcaption>
+        <button class="btn btn-ghost btn-sm" data-example="txt" data-i18n="gallery_ph_btn">Start with an example</button>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ ABOUT ============ -->
+  <section class="section section--narrow" id="about">
+    <div class="section-head">
+      <p class="eyebrow" data-i18n="about_eyebrow">Why it exists</p>
+      <h2 class="section-title" data-i18n="about_title">About</h2>
+    </div>
+    <div class="about-copy">
+      <p data-i18n="about_1">SketchForge started with a simple problem: I wanted to turn a drawing into a 3D-printed object, but creating a printable 3D model required CAD skills.</p>
+      <p data-i18n="about_2">So I built a tool to bridge the gap between a drawing and fabrication &mdash; something that reads an image the way a person sees it, and turns it into geometry a printer can make.</p>
+      <p data-i18n="about_3">What started as a way to make fan art became a broader experiment in making digital fabrication more accessible.</p>
+    </div>
+    <p class="about-tagline" data-i18n="about_tagline">Creativity &rarr; Computation &rarr; Fabrication.</p>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-brand">
+    <span class="brand-name">SketchForge</span>
+    <span class="footer-tagline" data-i18n="footer_tagline">From imagination to fabrication.</span>
+  </div>
+  <div class="footer-meta" data-i18n="footer_meta">Built with OpenCV, shapely, trimesh &amp; manifold3d.</div>
+</footer>
+
+<!-- 通用确认弹窗 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 class="modal-title" id="modalTitle"></h3>
+    <p class="modal-body" id="modalBody"></p>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

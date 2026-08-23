@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fog-server",
+      "runtimeExecutable": "/Users/louisliu/Desktop/Fan Object Generator/.venv/bin/python",
+      "runtimeArgs": ["server.py"],
+      "autoPort": true
+    }
+  ]
+}

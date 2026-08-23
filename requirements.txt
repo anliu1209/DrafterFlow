@@ -1,0 +1,10 @@
+opencv-python-headless>=4.8
+numpy>=1.24
+shapely>=2.0
+trimesh>=4.0
+manifold3d>=2.0
+
+# web frontend (server.py)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
