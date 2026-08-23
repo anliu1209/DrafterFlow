@@ -11,12 +11,22 @@ import numpy as np
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from shapely.validation import make_valid
 
+try:
+    from scipy.interpolate import splprep, splev  # periodic B-spline ring smoothing
+    _HAVE_SCIPY = True
+except Exception:  # scipy is a declared dep; keep Chaikin as a graceful fallback
+    _HAVE_SCIPY = False
+
 MIN_AREA_PX = 4.0  # drop anti-aliasing specks smaller than ~2x2 px
-SMOOTH_ITERATIONS = 2  # Chaikin corner-cutting passes, on top of the blur below
-SMOOTH_SIGMA = 1.0  # px. Gaussian-blur the mask BEFORE contour extraction so the
-# contour follows a smooth anti-aliased iso-boundary (removes the pixel staircase
-# that Chaikin alone leaves on shallow curves). Raise for smoother curves; too
-# high rounds sharp corners in line art and thins narrow strokes.
+SMOOTH_ITERATIONS = 2  # Chaikin passes (fallback when scipy/spline is unavailable)
+SMOOTH_SIGMA = 2.0  # px. Gaussian-blur the mask BEFORE contour extraction so the
+# contour follows a smooth anti-aliased iso-boundary. Raise for smoother curves;
+# too high rounds sharp corners in line art and thins narrow strokes.
+SPLINE_SMOOTH = 0.03  # splprep smoothing criterion s, scaled by ring point count
+SPLINE_COUNT = 220  # points to resample each closed ring to (dense -> smooth)
+SPLINE_TOLERANCE = 0.02  # px; Douglas-Peucker to drop collinear/duplicate spline
+# points. Dense resampled rings extrude into a non-watertight mesh (degenerate cap
+# triangles), so we thin them back out before handing to trimesh.
 
 # NOTE on shrink: blurring contracts sharp convex corners slightly and narrows thin
 # strokes. model_builder clips color∩base so the dark layer can't overflow the
@@ -85,7 +95,35 @@ def _chaikin(coords, iterations):
     return pts
 
 
-def _smooth_polygon(poly, iterations=SMOOTH_ITERATIONS):
+def _spline_ring(coords, smooth=SPLINE_SMOOTH, count=SPLINE_COUNT):
+    """Fit a periodic B-spline through a closed ring and resample it densely.
+
+    findContours returns integer-pixel coordinates, so a boundary crossing a
+    diagonal has to step by whole pixels -> the staircase on sloped/curved edges.
+    splprep(per=True) fits a smooth continuous sub-pixel curve through the ring,
+    which removes that staircase. Falls back to Chaikin when scipy is missing or
+    the ring is too small / degenerate for a spline.
+    """
+    if not _HAVE_SCIPY:
+        return _chaikin([list(c) for c in coords], SMOOTH_ITERATIONS)
+    pts = [list(c) for c in coords]
+    if len(pts) > 1 and pts[0] == pts[-1]:
+        pts = pts[:-1]
+    if len(pts) < 5:
+        return pts
+    try:
+        x = [p[0] for p in pts]
+        y = [p[1] for p in pts]
+        s = min(smooth * len(pts), 60.0)
+        tck, _u = splprep([x, y], s=s, per=True)
+        u = np.linspace(0.0, 1.0, count)
+        xs, ys = splev(u, tck)
+        return list(zip(xs, ys))
+    except Exception:
+        return _chaikin([list(c) for c in coords], SMOOTH_ITERATIONS)
+
+
+def _smooth_polygon(poly):
     """Smooth exterior and hole rings of a polygon (removes pixel staircase)."""
     if poly is None or poly.is_empty:
         return poly
@@ -96,7 +134,7 @@ def _smooth_polygon(poly, iterations=SMOOTH_ITERATIONS):
             c = c[:-1]
         if len(c) < 3:
             return c
-        return _chaikin(c, iterations)
+        return _spline_ring(c)
 
     def smooth_one(p):
         ext = ring(p.exterior.coords)
@@ -104,6 +142,9 @@ def _smooth_polygon(poly, iterations=SMOOTH_ITERATIONS):
         q = Polygon(ext, holes)
         if not q.is_valid:
             q = make_valid(q)
+        # Thin collinear/duplicate points so extrude_polygon produces a watertight
+        # mesh (see SPLINE_TOLERANCE). Sub-pixel tolerance: shape is unchanged.
+        q = q.simplify(SPLINE_TOLERANCE)
         return q
 
     parts = []
@@ -171,10 +212,10 @@ def base_polygons(base_mask):
     """
     m = (base_mask > 0).astype(np.uint8)
     m = _blur_mask(m)
-    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     filled = np.zeros_like(m)
     cv2.drawContours(filled, contours, -1, 1, thickness=cv2.FILLED)
-    contours, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
     polys = []
     for c in contours:
@@ -188,7 +229,7 @@ def color_polygons(color_mask):
     """Dark artwork, preserving holes (e.g. a frame ring + inner letters)."""
     m = (color_mask > 0).astype(np.uint8)
     m = _blur_mask(m)
-    contours, hierarchy = cv2.findContours(m, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(m, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     if hierarchy is None or len(contours) == 0:
         return []
     return [_smooth_polygon(p) for p in _tree_to_polygons(contours, hierarchy)]
