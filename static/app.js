@@ -237,10 +237,10 @@ function drawRing() {
     return;
   }
   const img = $('#maskImg');
-  const frame = $('#maskFrame').getBoundingClientRect();
+  const wrap = $('#ringOverlay').parentElement.getBoundingClientRect();
   const cr = imgContentRect(img);
-  overlay.style.left = (cr.x - frame.x) + 'px';
-  overlay.style.top = (cr.y - frame.y) + 'px';
+  overlay.style.left = (cr.x - wrap.x) + 'px';
+  overlay.style.top = (cr.y - wrap.y) + 'px';
   overlay.style.width = cr.w + 'px';
   overlay.style.height = cr.h + 'px';
   overlay.setAttribute('viewBox', `0 0 ${analysis.w_px} ${analysis.h_px}`);
@@ -262,13 +262,29 @@ function fromRingInputs() {
   drawRing();
 }
 
-function onMaskClick(evt) {
-  if (!holeToolActive || !analysis) return;
+// Magnetic snapping: pull the ring centre to the image centre (0,0) or to the
+// bbox edges (so it can straddle the edge and form a hang-tab).
+function snapMm(c) {
+  const sc = pxScaleMm();
+  const ex = (analysis.w_px / 2) * sc;
+  const ey = (analysis.h_px / 2) * sc;
+  const tolC = 2, tolE = 4;
+  let x = c.x, y = c.y;
+  if (Math.abs(x) < tolC) x = 0;
+  if (Math.abs(y) < tolC) y = 0;
+  if (Math.abs(x - ex) < tolE) x = ex;
+  else if (Math.abs(x + ex) < tolE) x = -ex;
+  if (Math.abs(y - ey) < tolE) y = ey;
+  else if (Math.abs(y + ey) < tolE) y = -ey;
+  return { x, y };
+}
+
+function placeRingAtClient(clientX, clientY) {
   const img = $('#maskImg');
   const cr = imgContentRect(img);
-  const nx = (evt.clientX - cr.x) * (analysis.w_px / cr.w);
-  const ny = (evt.clientY - cr.y) * (analysis.h_px / cr.h);
-  const c = pxToMm(nx, ny);
+  const nx = (clientX - cr.x) * (analysis.w_px / cr.w);
+  const ny = (clientY - cr.y) * (analysis.h_px / cr.h);
+  const c = snapMm(pxToMm(nx, ny));
   const inner = num($('#hole')) / 2;
   const outer = $('#ringOuter').value ? num($('#ringOuter')) : inner + 2;
   ringPlaced = { c, outer, inner };
@@ -277,6 +293,19 @@ function onMaskClick(evt) {
   $('#ringOuter').value = outer.toFixed(2);
   drawRing();
 }
+
+let draggingRing = false;
+function onMaskPointerDown(evt) {
+  if (!holeToolActive || !analysis) return;
+  evt.preventDefault();
+  draggingRing = true;
+  placeRingAtClient(evt.clientX, evt.clientY);
+}
+function onMaskPointerMove(evt) {
+  if (!draggingRing || !holeToolActive || !analysis) return;
+  placeRingAtClient(evt.clientX, evt.clientY);
+}
+function endMaskDrag() { draggingRing = false; }
 
 function setHoleTool(active) {
   holeToolActive = active;
@@ -393,6 +422,7 @@ const I18N = {
     orig_label: 'Original', orig_hint: 'reference', orig_toggle: '−',
     tool_hole: 'Hole',
     adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
+    ring_outer: 'Ring outer', ring_clear: 'Clear ring',
     mask_empty: 'Upload a drawing to preview its layers', vp_empty: 'Your 3D model appears here', vp_hint: 'Rotate · zoom · pan', vp_reset: 'Reset view',
     how_eyebrow: 'Under the hood', how_title: 'How it works', how_sub: 'A drawing goes through a real geometry pipeline — computer vision to manufacturable mesh.',
     how1_t: 'Input image', how1_b: 'A transparent-background PNG with dark line work.',
@@ -453,6 +483,7 @@ const I18N = {
     orig_label: '原图', orig_hint: '参考', orig_toggle: '−',
     tool_hole: '圆孔',
     adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
+    ring_outer: '外圆', ring_clear: '清除圆环',
     mask_empty: '上传图片以预览分层', vp_empty: '3D 模型会显示在这里', vp_hint: '旋转 · 缩放 · 平移', vp_reset: '重置视角',
     how_eyebrow: '底层原理', how_title: '它是怎么工作的', how_sub: '一张画会经过一条真实的几何流水线——从计算机视觉到可制造的网格。',
     how1_t: '输入图片', how1_b: '一张透明背景、深色线稿的 PNG。',
@@ -549,6 +580,8 @@ async function analyze() {
       ? t('solid_note')
       : t('dark_note').replace('{pct}', pct);
     $('#stageMeta').textContent = `${data.w_px} × ${data.h_px} ${t('px')} · ${note}`;
+    $('#maskFrame').style.setProperty('--ar', data.w_px / data.h_px);
+    $('#ringControls').hidden = false;
     updateMaskPreview();
     refreshLayerPanel();
   } catch (e) {
@@ -666,6 +699,8 @@ function applySource(file, name) {
   analysis = null;
   ringPlaced = null;
   setHoleTool(false);
+  $('#maskFrame').style.removeProperty('--ar');
+  $('#ringControls').hidden = true;
   $('#originalImg').src = sourceUrl;
   $('#originalPanel').hidden = false;
   updateMaskPreview();
@@ -781,7 +816,14 @@ function init() {
   $('#layerBaseEye').addEventListener('click', onLayerToggle);
   $('#layerReliefEye').addEventListener('click', onLayerToggle);
   $('#holeTool').addEventListener('click', () => setHoleTool(!holeToolActive));
-  $('#maskImg').addEventListener('click', onMaskClick);
+  $('#maskImg').addEventListener('pointerdown', onMaskPointerDown);
+  window.addEventListener('pointermove', onMaskPointerMove);
+  window.addEventListener('pointerup', endMaskDrag);
+  $('#ringClear').addEventListener('click', () => {
+    ringPlaced = null;
+    $('#holeX').value = ''; $('#holeY').value = ''; $('#ringOuter').value = '';
+    drawRing();
+  });
   $('#originalToggle').addEventListener('click', () => {
     const body = $('#originalBody');
     const collapsed = body.style.display === 'none';

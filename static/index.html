@@ -157,21 +157,6 @@
               </label>
               <input type="range" id="alphaThresholdRange" min="0" max="255" step="1" value="8">
             </div>
-            <div class="field field--pair">
-              <label class="field-label" for="holeX">
-                <span><span data-i18n="adv_hole">Hole X / Y</span> <em class="hint" data-i18n="adv_hole_hint">leave blank to auto-place</em></span>
-              </label>
-              <div class="pair-inputs">
-                <input type="number" id="holeX" placeholder="X mm" data-i18n-ph="hole_x_ph" step="0.5">
-                <input type="number" id="holeY" placeholder="Y mm" data-i18n-ph="hole_y_ph" step="0.5">
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="ringOuter">
-                <span><span data-i18n="adv_ring">Hang-tab outer radius</span> <em class="hint" data-i18n="adv_ring_hint">ring outer edge; > hole radius makes a tab when it crosses the edge. leave blank = no tab</em></span>
-                <span class="field-value"><input type="number" id="ringOuter" placeholder="— mm" step="0.5" min="0"></span>
-              </label>
-            </div>
           </details>
         </section>
 
@@ -204,7 +189,7 @@
       </aside>
 
       <section class="stage">
-        <div class="stage-head">
+        <aside class="stage-side">
           <div class="layer-panel" id="layerPanel" role="group" aria-label="Layers">
             <div class="layer-row" id="layerBase">
               <img class="layer-thumb" id="layerBaseThumb" alt="Base layer" hidden>
@@ -223,37 +208,51 @@
               </button>
             </div>
           </div>
-          <div class="stage-meta" id="stageMeta"></div>
-        </div>
 
-        <div class="original-panel" id="originalPanel" hidden>
-          <div class="original-head">
-            <span class="original-title"><data-i18n="orig_label">Original</data-i18n> <em class="chip" data-i18n="orig_hint">reference</em></span>
-            <button class="original-toggle" id="originalToggle" type="button" data-collapse="1" aria-expanded="true" title="Collapse / expand">−</button>
-          </div>
-          <div class="original-body" id="originalBody">
-            <img id="originalImg" alt="Original image" draggable="false">
-          </div>
-        </div>
-
-        <div class="mask-wrap">
           <div class="toolbar" id="toolbar">
             <button class="tool" id="holeTool" type="button" aria-pressed="false" title="Hole tool">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
               <span class="tool-label" data-i18n="tool_hole">Hole</span>
             </button>
           </div>
-          <div class="checker mask-frame" id="maskFrame">
-            <img id="maskImg" alt="Layer preview" draggable="false" hidden>
+
+          <div class="ring-controls" id="ringControls" hidden>
+            <label class="ring-field">
+              <span data-i18n="ring_outer">Ring outer</span>
+              <input type="number" id="ringOuter" placeholder="mm" step="0.5" min="0">
+            </label>
+            <div class="ring-field ring-xy">
+              <label><span data-i18n="hole_x_ph">X</span><input type="number" id="holeX" placeholder="X" step="0.5"></label>
+              <label><span data-i18n="hole_y_ph">Y</span><input type="number" id="holeY" placeholder="Y" step="0.5"></label>
+            </div>
+            <button class="ring-clear" id="ringClear" type="button" data-i18n="ring_clear">Clear ring</button>
+          </div>
+          <div class="stage-meta" id="stageMeta"></div>
+        </aside>
+
+        <div class="stage-main">
+          <div class="original-panel" id="originalPanel" hidden>
+            <div class="original-head">
+              <span class="original-title"><data-i18n="orig_label">Original</data-i18n> <em class="chip" data-i18n="orig_hint">reference</em></span>
+              <button class="original-toggle" id="originalToggle" type="button" data-collapse="1" aria-expanded="true" title="Collapse / expand">−</button>
+            </div>
+            <div class="original-body" id="originalBody">
+              <img id="originalImg" alt="Original image" draggable="false">
+            </div>
+          </div>
+
+          <div class="mask-wrap">
+            <div class="checker mask-frame" id="maskFrame">
+              <img id="maskImg" alt="Layer preview" draggable="false" hidden>
+              <div class="empty" id="maskEmpty" data-i18n="mask_empty">Upload a drawing to preview its layers</div>
+            </div>
             <svg class="ring-overlay" id="ringOverlay">
               <circle id="ringOuterCircle" class="ring-outer" fill="rgba(255,62,62,0.06)" stroke="#ff3e3e" stroke-width="1.2" stroke-dasharray="4 3" />
               <circle id="ringInnerCircle" class="ring-inner" fill="rgba(255,62,62,0)" stroke="#ff3e3e" stroke-width="1.6" />
             </svg>
-            <div class="empty" id="maskEmpty" data-i18n="mask_empty">Upload a drawing to preview its layers</div>
           </div>
-        </div>
 
-        <div class="viewport" id="viewport">
+          <div class="viewport" id="viewport">
           <canvas id="threeCanvas"></canvas>
           <div class="vp-empty" id="vpEmpty">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -265,6 +264,7 @@
           </div>
           <button class="vp-reset" id="resetView" hidden data-i18n="vp_reset">Reset view</button>
           <div class="vp-info" id="vpInfo" hidden></div>
+        </div>
         </div>
       </section>
     </div>
