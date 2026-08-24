@@ -479,8 +479,6 @@ function setTool(name) {
     if (b) { b.classList.toggle('is-active', n === name); b.setAttribute('aria-pressed', String(n === name)); }
   });
   canvas.classList.toggle('is-placement', activeTool === 'hole');
-  const th = $('#toolHint');
-  if (th) th.hidden = activeTool !== 'hole';
 }
 
 function deleteSelectedHole() {
@@ -1066,6 +1064,8 @@ function init() {
     const b = $('#tool' + n.charAt(0).toUpperCase() + n.slice(1));
     if (b) b.addEventListener('click', () => setTool(n));
   });
+  $('#toolHole').addEventListener('mouseenter', () => { if (analysis) $('#toolHint').hidden = false; });
+  $('#toolHole').addEventListener('mouseleave', () => { $('#toolHint').hidden = true; });
   $('#zoomIn').addEventListener('click', () => zoomBy(1.2));
   $('#zoomOut').addEventListener('click', () => zoomBy(1 / 1.2));
   $('#zoomFit').addEventListener('click', fitCanvas);
