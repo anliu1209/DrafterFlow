@@ -442,41 +442,75 @@ input[type="range"]::-moz-range-thumb {
 .status.ok { color: var(--accent); }
 
 /* ---------------- stage ---------------- */
-.stage { display: flex; flex-direction: row; align-items: flex-start; min-width: 0; gap: 14px; }
-.stage-side { display: flex; flex-direction: column; gap: 10px; flex: 0 0 180px; position: sticky; top: 14px; }
-.stage-main { display: flex; flex-direction: column; gap: 14px; flex: 1; min-width: 0; }
-.stage-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.segmented { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; box-shadow: var(--shadow); }
-.seg {
-  border: none; background: transparent; color: var(--ink-dim);
-  font-family: var(--mono); font-size: 12px; letter-spacing: .02em;
-  padding: 6px 15px; border-radius: 999px; cursor: pointer;
-  transition: all .15s ease;
+.stage { display: flex; flex-direction: row; align-items: flex-start; min-width: 0; gap: 12px; }
+.tools { display: flex; flex-direction: column; gap: 8px; flex: 0 0 44px; align-items: center; padding-top: 2px; }
+.tool {
+  position: relative; display: grid; place-items: center;
+  width: 42px; height: 42px; background: var(--surface); color: var(--ink-dim);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; padding: 0;
+  transition: all .12s ease;
 }
-.seg:hover { color: var(--ink); }
-.seg.active { background: var(--ink); color: var(--bg); }
+.tool svg { width: 22px; height: 22px; }
+.tool-label {
+  position: absolute; left: 48px; top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-family: var(--mono); font-size: 11px;
+  background: var(--surface); border: 1px solid var(--line); padding: 3px 7px;
+  border-radius: var(--r-sm); color: var(--ink-dim); pointer-events: none;
+  opacity: 0; transition: opacity .12s ease; z-index: 6;
+}
+.tool:hover { color: var(--ink); }
+.tool:hover .tool-label { opacity: 1; }
+.tool.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tool:disabled { opacity: .4; cursor: not-allowed; }
+.stage-main { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 0; }
+.editor-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.zoom-controls { display: inline-flex; gap: 4px; }
+.zoom-controls button {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-dim);
+  border-radius: var(--r-sm); font-family: var(--mono); font-size: 12px; padding: 5px 9px; cursor: pointer;
+}
+.zoom-controls button:hover { color: var(--ink); border-color: var(--line-strong); }
+.orig-toggle {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-dim);
+  border-radius: var(--r-sm); font-family: var(--mono); font-size: 12px; padding: 6px 11px; cursor: pointer;
+}
+.orig-toggle:hover, .orig-toggle.is-active { color: var(--ink); border-color: var(--line-strong); }
 .stage-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: .04em; }
 
-.mask-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; box-shadow: var(--shadow); width: fit-content; margin: 0 auto; }
-.mask-frame { margin: 0 auto; aspect-ratio: 1 / 1; height: auto; width: min(100%, calc(320px * var(--ar, 1))); }
-.checker {
-  position: relative;
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  background: repeating-conic-gradient(#e7e6e1 0% 25%, #f0efeb 0% 50%) 0 0 / 16px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.canvas-wrap {
+  position: relative; height: 520px; min-height: 320px;
+  border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden;
+  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
 }
-[data-theme="dark"] .checker {
-  background: repeating-conic-gradient(#26252e 0% 25%, #201f27 0% 50%) 0 0 / 16px 16px;
+#editorCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+#editorCanvas.is-placement { cursor: crosshair; }
+.hole-message {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 7px 12px; color: var(--ink-dim); font-size: 12px; pointer-events: none; max-width: 90%;
 }
-.checker img { width: 100%; height: 100%; object-fit: contain; }
+.hole-message.bad { color: #e03e3e; border-color: #e03e3e; }
 .empty {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  color: var(--ink-faint); font-size: 13px; text-align: center; padding: 0 20px;
+  color: var(--ink-faint); font-size: 13px; text-align: center; padding: 0 20px; pointer-events: none;
 }
+
+/* hole list (side card) */
+.hole-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.hole-item { display: grid; grid-template-columns: auto 1fr 1fr 1.5fr auto; gap: 6px; align-items: center; padding: 4px; border: 1px solid transparent; border-radius: var(--r-sm); }
+.hole-item.selected { border-color: var(--line-strong); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.hole-dot { width: 10px; height: 10px; border-radius: 50%; }
+.hole-dot.ok { background: #23a55a; }
+.hole-dot.bad { background: #e03e3e; }
+.hole-item label { display: flex; gap: 3px; align-items: center; font-size: 11px; color: var(--ink-faint); }
+.hole-item input {
+  width: 100%; background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+  border-radius: var(--r-sm); padding: 4px 6px; font-family: var(--mono); font-size: 12px;
+}
+.hd { background: transparent; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; line-height: 1; }
+.hd:hover { color: var(--ink); }
 
 /* 3D viewport */
 .viewport {
@@ -547,29 +581,7 @@ input[type="range"]::-moz-range-thumb {
 .original-body { display: flex; justify-content: center; align-items: center; padding: 8px; }
 .original-body img { max-width: 100%; max-height: 130px; object-fit: contain; }
 
-/* ---------------- side toolbar + hole tool ---------------- */
-.mask-wrap { position: relative; }
-.toolbar { display: flex; flex-direction: column; gap: 6px; }
-.tool {
-  position: relative; display: grid; place-items: center;
-  width: 40px; height: 40px; background: var(--surface); color: var(--ink-dim);
-  border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; padding: 0;
-  transition: all .12s ease;
-}
-.tool svg { width: 22px; height: 22px; }
-.tool-label {
-  position: absolute; left: 46px; top: 50%; transform: translateY(-50%);
-  white-space: nowrap; font-family: var(--mono); font-size: 11px;
-  background: var(--surface); border: 1px solid var(--line); padding: 3px 7px;
-  border-radius: var(--r-sm); color: var(--ink-dim); pointer-events: none;
-  opacity: 0; transition: opacity .12s ease; z-index: 6;
-}
-.tool:hover { color: var(--ink); }
-.tool:hover .tool-label { opacity: 1; }
-.tool.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
-
-/* ---------------- ring controls (side, always visible) ---------------- */
-.ring-controls { display: flex; flex-direction: column; gap: 7px; padding-top: 2px; }
+/* ---------------- hole list / hole card inputs ---------------- */
 .ring-field { display: flex; flex-direction: column; gap: 3px; }
 .ring-field > span { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: .03em; }
 .ring-field input {
@@ -578,21 +590,11 @@ input[type="range"]::-moz-range-thumb {
   font-family: var(--mono); font-size: 13px;
 }
 .ring-field input:focus { outline: none; border-color: var(--accent); }
-.ring-xy { flex-direction: row; gap: 6px; }
-.ring-xy label { display: flex; align-items: center; gap: 5px; flex: 1; }
-.ring-xy label span { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
 .ring-clear {
-  background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
-  border-radius: var(--r-sm); padding: 6px 8px; cursor: pointer; font-size: 12px;
+  width: 100%; background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
+  border-radius: var(--r-sm); padding: 6px 8px; cursor: pointer; font-size: 12px; margin-top: 8px;
 }
 .ring-clear:hover { color: var(--ink); border-color: var(--line-strong); }
-
-/* ---------------- ring overlay (hole tool) ---------------- */
-.ring-overlay { display: none; position: absolute; overflow: visible; pointer-events: none; }
-.ring-outer { fill: rgba(255, 62, 62, 0.06); stroke: #ff3e3e; stroke-width: 1.2; stroke-dasharray: 4 3; }
-.ring-inner { fill: rgba(255, 62, 62, 0); stroke: #ff3e3e; stroke-width: 1.6; }
-.mask-frame.placement { cursor: crosshair; }
-.mask-frame.placement img { cursor: crosshair; }
 
 /* ---------------- pipeline ---------------- */
 .pipeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }

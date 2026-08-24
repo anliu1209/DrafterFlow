@@ -10,6 +10,7 @@ Run with:  .venv/bin/python server.py   (then open http://127.0.0.1:8000)
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import tempfile
@@ -163,6 +164,12 @@ async def analyze(
         base_sum = int(filled_base.sum())
         color_sum = int(color_mask.sum())
         dark_ratio = round(color_sum / base_sum, 4) if base_sum else 0.0
+        # Base silhouette exterior rings (pixel space, y-down) so the frontend can
+        # judge whether a placed ring overlaps the base (printable) or floats outside.
+        base_rings = []
+        for poly in base_polygons(base_mask):
+            for g in (getattr(poly, "geoms", [poly])):
+                base_rings.append([[round(float(x), 2), round(float(y), 2)] for x, y in g.exterior.coords])
         return {
             "ok": True,
             "w_px": w_px,
@@ -172,6 +179,7 @@ async def analyze(
             "combined_png": _combined_png(filled_base, color_mask, base_rgb, color_rgb),
             "dark_ratio": dark_ratio,
             "clearance_disabled": dark_ratio >= 0.85,
+            "base_poly": base_rings,
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -187,6 +195,7 @@ async def generate(
     hole_x: str | None = Form(None),
     hole_y: str | None = Form(None),
     tab_outer_radius: str | None = Form(None),
+    holes: str | None = Form(None),  # JSON list of {x,y,outer} (multi-hole)
     dark_threshold: str = Form("100"),
     alpha_threshold: str = Form("8"),
 ):
@@ -210,6 +219,17 @@ async def generate(
     if tab_r is not None and hx is None:
         raise HTTPException(422, "已启用挂耳（外环），请同时提供孔位 X / Y。")
 
+    holes_list = None
+    if holes not in (None, ""):
+        try:
+            raw = json.loads(holes)
+            holes_list = [
+                (float(item[0]), float(item[1]), (float(item[2]) if len(item) > 2 and item[2] is not None else None))
+                for item in raw
+            ]
+        except Exception:
+            holes_list = None
+
     tmpdir = tempfile.mkdtemp(prefix="fog_")
     try:
         path = _save_upload(data, tmpdir)
@@ -217,19 +237,19 @@ async def generate(
             base_mask, color_mask, (h_px, w_px) = extract_masks(path, alpha, dark)
             base_polys = base_polygons(base_mask)
             color_polys = color_polygons(color_mask)
-            hole_position = (hx, hy) if hx is not None else None
-            mesh, hole_center = build_model(
-                base_polys,
-                color_polys,
-                w_px,
-                h_px,
-                width_mm=width_mm,
-                base_thickness=base_th,
-                color_thickness=color_th,
-                hole_diameter=hole_d,
-                hole_position=hole_position,
-                tab_outer_radius=tab_r,
-            )
+            if holes_list:
+                mesh, hole_center = build_model(
+                    base_polys, color_polys, w_px, h_px,
+                    width_mm=width_mm, base_thickness=base_th, color_thickness=color_th,
+                    hole_diameter=hole_d, holes=holes_list,
+                )
+            else:
+                hole_position = (hx, hy) if hx is not None else None
+                mesh, hole_center = build_model(
+                    base_polys, color_polys, w_px, h_px,
+                    width_mm=width_mm, base_thickness=base_th, color_thickness=color_th,
+                    hole_diameter=hole_d, hole_position=hole_position, tab_outer_radius=tab_r,
+                )
         except ImageProcessingError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         except ModelBuildError as exc:

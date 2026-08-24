@@ -12,8 +12,11 @@ let sourceUrl = null;       // object URL for the "原图" view
 let sourceName = '';
 let analysis = null;        // result of /api/analyze
 let layerState = { base: true, relief: true };  // preview-only layer visibility
-let ringPlaced = null;      // {c:{x,y}, outer, inner} in mm, or null
-let holeToolActive = false;
+let holes = [];             // [{id, x, y, outer, inner, valid}] in mm
+let activeTool = 'select';  // select | hole | eraser | draw (later)
+let selectedHoleId = null;
+let holeSeq = 1;
+let basePoly = [];          // base silhouette rings, image px (from analysis.base_poly)
 let stlBlob = null;
 let holeCenter = null;
 let committedSourceName = null;  // the source that produced the current STL
@@ -170,27 +173,18 @@ function onColorChange() {
   scheduleAnalyze();
 }
 
-// ---------- previews & layer visibility (preview-only for now) ----------
+// ---------- 2D editor canvas + tools + multi-hole ----------
 const VIEW_SRC = { combined: 'combined_png', base: 'base_png', color: 'color_png' };
+let canvas, ictx;
+let view = { zoom: 1, ox: 0, oy: 0 };   // image-px -> canvas-px: c = img*zoom + o
+let dragState = null;                    // {type:'pan'|'move'|'add', ...}
+let editorImg = new Image();
 
 function updateLayerVisibility() {
   layerState.base = $('#layerBaseEye').classList.contains('is-on');
   layerState.relief = $('#layerReliefEye').classList.contains('is-on');
   if (baseMesh) baseMesh.visible = layerState.base;
   if (topMesh) topMesh.visible = layerState.relief;
-}
-
-function updateMaskPreview() {
-  const img = $('#maskImg'), empty = $('#maskEmpty');
-  let src = null;
-  if (analysis) {
-    src = layerState.base && layerState.relief ? analysis.combined_png
-      : layerState.base ? analysis.base_png
-      : layerState.relief ? analysis.color_png
-      : null;
-  }
-  if (src) { img.src = src; img.hidden = false; empty.hidden = true; }
-  else { img.src = ''; img.hidden = true; empty.hidden = true; }
 }
 
 function refreshLayerPanel() {
@@ -203,13 +197,12 @@ function onLayerToggle() {
   this.classList.toggle('is-on');
   this.setAttribute('aria-pressed', String(this.classList.contains('is-on')));
   updateLayerVisibility();
-  updateMaskPreview();
+  loadLayerPreview();
 }
 
-// ---------- ring / hole tool ----------
+// px <-> mm (mirrors model_builder._scale_and_center)
 function pxScaleMm() {
-  const wh = Math.max(analysis.w_px, analysis.h_px);
-  return num($('#width')) / wh;
+  return num($('#width')) / Math.max(analysis.w_px, analysis.h_px);
 }
 function pxToMm(nx, ny) {
   const sc = pxScaleMm();
@@ -219,51 +212,7 @@ function mmToPx(mx, my) {
   const sc = pxScaleMm();
   return { x: mx / sc + analysis.w_px / 2, y: analysis.h_px / 2 - my / sc };
 }
-// The placement <img> is letterboxed (object-fit: contain); return the rendered
-// content rect in client coords so clicks and the ring overlay map 1:1 to native px.
-function imgContentRect(img) {
-  const el = img.getBoundingClientRect();
-  const nw = img.naturalWidth, nh = img.naturalHeight;
-  if (!nw || !nh) return { x: el.x, y: el.y, w: el.width, h: el.height };
-  const scale = Math.min(el.width / nw, el.height / nh);
-  const w = nw * scale, h = nh * scale;
-  return { x: el.x + (el.width - w) / 2, y: el.y + (el.height - h) / 2, w, h };
-}
-
-function drawRing() {
-  const overlay = $('#ringOverlay');
-  if (!ringPlaced || !analysis) {
-    overlay.style.display = 'none';
-    return;
-  }
-  const img = $('#maskImg');
-  const wrap = $('#ringOverlay').parentElement.getBoundingClientRect();
-  const cr = imgContentRect(img);
-  overlay.style.left = (cr.x - wrap.x) + 'px';
-  overlay.style.top = (cr.y - wrap.y) + 'px';
-  overlay.style.width = cr.w + 'px';
-  overlay.style.height = cr.h + 'px';
-  overlay.setAttribute('viewBox', `0 0 ${analysis.w_px} ${analysis.h_px}`);
-  overlay.style.display = 'block';
-  const sc = pxScaleMm();
-  const p = mmToPx(ringPlaced.c.x, ringPlaced.c.y);
-  $('#ringOuterCircle').setAttribute('cx', p.x); $('#ringOuterCircle').setAttribute('cy', p.y);
-  $('#ringOuterCircle').setAttribute('r', ringPlaced.outer / sc);
-  $('#ringInnerCircle').setAttribute('cx', p.x); $('#ringInnerCircle').setAttribute('cy', p.y);
-  $('#ringInnerCircle').setAttribute('r', ringPlaced.inner / sc);
-}
-
-function fromRingInputs() {
-  if (!analysis) return;
-  const hx = $('#holeX').value, hy = $('#holeY').value, ro = $('#ringOuter').value;
-  if (hx === '' || hy === '') { ringPlaced = null; drawRing(); return; }
-  const inner = num($('#hole')) / 2;
-  ringPlaced = { c: { x: num($('#holeX')), y: num($('#holeY')) }, outer: ro ? num($('#ringOuter')) : inner + 2, inner };
-  drawRing();
-}
-
-// Magnetic snapping: pull the ring centre to the image centre (0,0) or to the
-// bbox edges (so it can straddle the edge and form a hang-tab).
+// Magnetic snapping: centre (0,0) or the bbox edges (hang-tab straddle).
 function snapMm(c) {
   const sc = pxScaleMm();
   const ex = (analysis.w_px / 2) * sc;
@@ -279,40 +228,247 @@ function snapMm(c) {
   return { x, y };
 }
 
-function placeRingAtClient(clientX, clientY) {
-  const img = $('#maskImg');
-  const cr = imgContentRect(img);
-  const nx = (clientX - cr.x) * (analysis.w_px / cr.w);
-  const ny = (clientY - cr.y) * (analysis.h_px / cr.h);
-  const c = snapMm(pxToMm(nx, ny));
-  const inner = num($('#hole')) / 2;
-  const outer = $('#ringOuter').value ? num($('#ringOuter')) : inner + 2;
-  ringPlaced = { c, outer, inner };
-  $('#holeX').value = c.x.toFixed(2);
-  $('#holeY').value = c.y.toFixed(2);
-  $('#ringOuter').value = outer.toFixed(2);
-  drawRing();
+// validity: outer circle intersects the base silhouette (px rings).
+function holeValid(h) {
+  const sc = pxScaleMm();
+  const p = mmToPx(h.x, h.y);
+  const outerPx = (h.outer || h.inner) / sc;
+  if (pointInAnyRing(p.x, p.y)) return true;
+  for (const ring of basePoly) if (distToRing(p.x, p.y, ring) <= outerPx) return true;
+  return false;
+}
+function pointInAnyRing(px, py) {
+  return basePoly.some(ring => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  });
+}
+function distToRing(px, py, ring) {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ax, ay] = ring[j], [bx, by] = ring[i];
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const qx = ax + t * dx, qy = ay + t * dy;
+    best = Math.min(best, Math.hypot(px - qx, py - qy));
+  }
+  return best;
 }
 
-let draggingRing = false;
-function onMaskPointerDown(evt) {
-  if (!holeToolActive || !analysis) return;
+function toCanvas(ix, iy) { return { x: view.ox + ix * view.zoom, y: view.oy + iy * view.zoom }; }
+function toImage(cx, cy) { return { x: (cx - view.ox) / view.zoom, y: (cy - view.oy) / view.zoom }; }
+
+function drawChecker(x, y, w, h) {
+  const cs = 14;
+  for (let yy = y; yy < y + h; yy += cs)
+    for (let xx = x; xx < x + w; xx += cs) {
+      const odd = ((Math.floor((xx - x) / cs) + Math.floor((yy - y) / cs)) % 2) === 0;
+      ictx.fillStyle = odd ? '#f0efeb' : '#e7e6e1';
+      ictx.fillRect(xx, yy, Math.min(cs, x + w - xx), Math.min(cs, y + h - yy));
+    }
+}
+
+function renderCanvas() {
+  if (!ictx || !analysis) return;
+  const W = canvas.width, H = canvas.height;
+  ictx.clearRect(0, 0, W, H);
+  const c0 = toCanvas(0, 0), c1 = toCanvas(analysis.w_px, analysis.h_px);
+  drawChecker(c0.x, c0.y, c1.x - c0.x, c1.y - c0.y);
+  if (editorImg.src && editorImg.naturalWidth)
+    ictx.drawImage(editorImg, c0.x, c0.y, c1.x - c0.x, c1.y - c0.y);
+  for (const h of holes) drawHole(h);
+  const sel = holes.find(h => h.id === selectedHoleId);
+  if (sel) drawCrosshair(sel);
+}
+
+function drawHole(h) {
+  const sc = pxScaleMm();
+  const c0 = toCanvas(mmToPx(h.x, h.y).x, mmToPx(h.x, h.y).y);
+  const rOut = ((h.outer || h.inner) / sc) * view.zoom;
+  const rIn = (h.inner / sc) * view.zoom;
+  const col = h.valid ? '#23a55a' : '#e03e3e';
+  ictx.strokeStyle = col; ictx.lineWidth = 1.6;
+  ictx.fillStyle = h.valid ? 'rgba(35,165,90,0.10)' : 'rgba(224,62,62,0.12)';
+  ictx.beginPath(); ictx.arc(c0.x, c0.y, rOut, 0, Math.PI * 2); ictx.fill();
+  ictx.setLineDash([4, 3]); ictx.beginPath(); ictx.arc(c0.x, c0.y, rOut, 0, Math.PI * 2); ictx.stroke(); ictx.setLineDash([]);
+  ictx.lineWidth = 1.8; ictx.beginPath(); ictx.arc(c0.x, c0.y, rIn, 0, Math.PI * 2); ictx.stroke();
+}
+
+function drawCrosshair(h) {
+  const c0 = toCanvas(mmToPx(h.x, h.y).x, mmToPx(h.x, h.y).y);
+  ictx.strokeStyle = '#3d7be0'; ictx.lineWidth = 1.4;
+  ictx.beginPath();
+  ictx.moveTo(c0.x - 9, c0.y); ictx.lineTo(c0.x + 9, c0.y);
+  ictx.moveTo(c0.x, c0.y - 9); ictx.lineTo(c0.x, c0.y + 9);
+  ictx.stroke();
+}
+
+function loadLayerPreview() {
+  if (!analysis) { editorImg.src = ''; return; }
+  const src = layerState.base && layerState.relief ? analysis.combined_png
+    : layerState.base ? analysis.base_png
+    : layerState.relief ? analysis.color_png : null;
+  if (!src) { editorImg.src = ''; renderCanvas(); return; }
+  editorImg.onload = () => renderCanvas();
+  editorImg.src = src;
+}
+
+function fitCanvas() {
+  if (!analysis) return;
+  const wrap = $('#canvasWrap');
+  const W = Math.max(1, wrap.clientWidth), H = Math.max(1, wrap.clientHeight);
+  canvas.width = W; canvas.height = H;
+  const s = Math.min(W / analysis.w_px, H / analysis.h_px) * 0.93;
+  view.zoom = s;
+  view.ox = (W - analysis.w_px * s) / 2;
+  view.oy = (H - analysis.h_px * s) / 2;
+  renderCanvas();
+}
+
+function recompute() {
+  holes.forEach(h => { h.valid = holeValid(h); });
+  renderHoleList();
+  renderCanvas();
+  updateHoleMessage();
+}
+
+function updateHoleMessage() {
+  const msg = $('#holeMessage');
+  const invalid = holes.filter(h => !h.valid);
+  if (analysis && invalid.length) {
+    msg.textContent = t('hole_invalid');   // "cannot print, choose a suitable position"
+    msg.classList.add('bad'); msg.hidden = false;
+  } else { msg.hidden = true; msg.classList.remove('bad'); }
+}
+
+function canvasPoint(evt) {
+  const r = canvas.getBoundingClientRect();
+  return { x: evt.clientX - r.x, y: evt.clientY - r.y };
+}
+function hitHole(cx, cy) {
+  const ip = toImage(cx, cy); const mm = pxToMm(ip.x, ip.y);
+  const sc = pxScaleMm();
+  for (let i = holes.length - 1; i >= 0; i--) {
+    const h = holes[i];
+    const r = ((h.outer || h.inner) / sc) * view.zoom;
+    const c0 = toCanvas(mmToPx(h.x, h.y).x, mmToPx(h.x, h.y).y);
+    if (Math.hypot(cx - c0.x, cy - c0.y) <= r) return h;
+  }
+  return null;
+}
+
+function onCanvasPointerDown(evt) {
+  if (!analysis) return;
+  const p = canvasPoint(evt);
+  if (activeTool === 'hole') {
+    const c = snapMm(pxToMm(toImage(p.x, p.y).x, toImage(p.x, p.y).y));
+    const inner = num($('#hole')) / 2;
+    const outer = $('#newHoleOuter').value ? num($('#newHoleOuter')) : inner + 2;
+    const hole = { id: holeSeq++, x: c.x, y: c.y, outer, inner, valid: true };
+    holes.push(hole);
+    selectedHoleId = hole.id;
+    recompute();
+  } else if (activeTool === 'eraser') {
+    const h = hitHole(p.x, p.y);
+    if (h) { holes = holes.filter(x => x.id !== h.id); if (selectedHoleId === h.id) selectedHoleId = null; recompute(); }
+  } else {
+    const h = hitHole(p.x, p.y);
+    if (h) { selectedHoleId = h.id; dragState = { type: 'move', hole: h }; }
+    else { selectedHoleId = null; dragState = { type: 'pan', sx: p.x, sy: p.y, ox: view.ox, oy: view.oy }; }
+    recompute();
+  }
+}
+function onCanvasPointerMove(evt) {
+  if (!dragState) return;
+  const p = canvasPoint(evt);
+  if (dragState.type === 'pan') {
+    view.ox = dragState.ox + (p.x - dragState.sx);
+    view.oy = dragState.oy + (p.y - dragState.sy);
+    renderCanvas();
+  } else if (dragState.type === 'move') {
+    const c = snapMm(pxToMm(toImage(p.x, p.y).x, toImage(p.x, p.y).y));
+    dragState.hole.x = c.x; dragState.hole.y = c.y;
+    recompute();
+  }
+}
+function onCanvasPointerUp() {
+  if (dragState && dragState.type === 'add') { /** no-op */ }
+  dragState = null;
+}
+function onCanvasWheel(evt) {
+  if (!analysis) return;
   evt.preventDefault();
-  draggingRing = true;
-  placeRingAtClient(evt.clientX, evt.clientY);
+  const p = canvasPoint(evt);
+  const factor = evt.deltaY < 0 ? 1.1 : 1 / 1.1;
+  const ns = Math.max(0.1, Math.min(12, view.zoom * factor));
+  view.ox = p.x - (p.x - view.ox) * (ns / view.zoom);
+  view.oy = p.y - (p.y - view.oy) * (ns / view.zoom);
+  view.zoom = ns;
+  renderCanvas();
 }
-function onMaskPointerMove(evt) {
-  if (!draggingRing || !holeToolActive || !analysis) return;
-  placeRingAtClient(evt.clientX, evt.clientY);
-}
-function endMaskDrag() { draggingRing = false; }
 
-function setHoleTool(active) {
-  holeToolActive = active;
-  const btn = $('#holeTool');
-  btn.classList.toggle('is-active', active);
-  btn.setAttribute('aria-pressed', String(active));
-  $('#maskFrame').classList.toggle('placement', active);
+function setTool(name) {
+  activeTool = name;
+  ['select', 'hole', 'eraser', 'draw'].forEach(n => {
+    const b = $('#tool' + n.charAt(0).toUpperCase() + n.slice(1));
+    if (b) { b.classList.toggle('is-active', n === name); b.setAttribute('aria-pressed', String(n === name)); }
+  });
+  canvas.classList.toggle('is-placement', activeTool === 'hole');
+}
+
+function deleteSelectedHole() {
+  if (selectedHoleId == null) return;
+  holes = holes.filter(x => x.id !== selectedHoleId);
+  selectedHoleId = null;
+  recompute();
+}
+
+function renderHoleList() {
+  const list = $('#holeList');
+  if (!list) return;
+  list.innerHTML = '';
+  holes.forEach(h => {
+    const row = document.createElement('div');
+    row.className = 'hole-item' + (h.id === selectedHoleId ? ' selected' : '');
+    row.innerHTML = `<span class="hole-dot ${h.valid ? 'ok' : 'bad'}" title="${h.valid ? '' : t('hole_invalid')}"></span>`
+      + `<label>X<input type="number" class="hx" step="0.5" value="${h.x.toFixed(2)}"></label>`
+      + `<label>Y<input type="number" class="hy" step="0.5" value="${h.y.toFixed(2)}"></label>`
+      + `<input type="number" class="houter" step="0.5" value="${h.outer != null ? h.outer.toFixed(2) : ''}" placeholder="${t('ring_outer')}">`
+      + `<button class="hd" type="button" title="Delete">×</button>`;
+    row.addEventListener('click', (evt) => { if (evt.target.closest('.hd')) return; selectedHoleId = h.id; renderHoleList(); renderCanvas(); });
+    row.querySelector('.hx').addEventListener('input', (evt) => { h.x = num(evt.target); recompute(); });
+    row.querySelector('.hy').addEventListener('input', (evt) => { h.y = num(evt.target); recompute(); });
+    row.querySelector('.houter').addEventListener('input', (evt) => { h.outer = evt.target.value === '' ? null : num(evt.target); recompute(); });
+    row.querySelector('.hd').addEventListener('click', () => { holes = holes.filter(x => x.id !== h.id); if (selectedHoleId === h.id) selectedHoleId = null; recompute(); });
+    list.appendChild(row);
+  });
+}
+
+function clearHoles() { holes = []; selectedHoleId = null; recompute(); }
+
+function setupCanvas() {
+  canvas = $('#editorCanvas');
+  ictx = canvas.getContext('2d');
+  canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
+  canvas.addEventListener('pointerdown', onCanvasPointerDown);
+  window.addEventListener('pointermove', onCanvasPointerMove);
+  window.addEventListener('pointerup', onCanvasPointerUp);
+}
+
+function zoomBy(f) {
+  if (!analysis) return;
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const ns = Math.max(0.1, Math.min(12, view.zoom * f));
+  view.ox = cx - (cx - view.ox) * (ns / view.zoom);
+  view.oy = cy - (cy - view.oy) * (ns / view.zoom);
+  view.zoom = ns;
+  renderCanvas();
 }
 
 // ---------- cross-section gauge ----------
@@ -421,6 +577,9 @@ const I18N = {
     seg_original: 'Original', seg_layers: 'Layers', seg_base: 'Base', seg_relief: 'Relief',
     orig_label: 'Original', orig_hint: 'reference', orig_toggle: '−',
     tool_hole: 'Hole',
+    tool_select: 'Select', tool_eraser: 'Eraser', tool_draw: 'Draw (soon)',
+    zoom_fit: 'Fit',
+    card_holes: 'Holes', new_hole_outer: 'New ring outer', hole_invalid: '⚠ cannot print — pick a position on the base',
     adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
     ring_outer: 'Ring outer', ring_clear: 'Clear ring',
     mask_empty: 'Upload a drawing to preview its layers', vp_empty: 'Your 3D model appears here', vp_hint: 'Rotate · zoom · pan', vp_reset: 'Reset view',
@@ -482,6 +641,9 @@ const I18N = {
     seg_original: '原图', seg_layers: '分层', seg_base: '底板', seg_relief: '浮雕',
     orig_label: '原图', orig_hint: '参考', orig_toggle: '−',
     tool_hole: '圆孔',
+    tool_select: '选择', tool_eraser: '橡皮擦', tool_draw: '画图形（即将）',
+    zoom_fit: '适应',
+    card_holes: '孔', new_hole_outer: '新挂耳外径', hole_invalid: '⚠ 无法打印——请在底板上选位置',
     adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
     ring_outer: '外圆', ring_clear: '清除圆环',
     mask_empty: '上传图片以预览分层', vp_empty: '3D 模型会显示在这里', vp_hint: '旋转 · 缩放 · 平移', vp_reset: '重置视角',
@@ -580,10 +742,15 @@ async function analyze() {
       ? t('solid_note')
       : t('dark_note').replace('{pct}', pct);
     $('#stageMeta').textContent = `${data.w_px} × ${data.h_px} ${t('px')} · ${note}`;
-    $('#maskFrame').style.setProperty('--ar', data.w_px / data.h_px);
-    $('#ringControls').hidden = false;
-    updateMaskPreview();
+    basePoly = data.base_poly || [];
+    holes = []; selectedHoleId = null;
+    $('#holeCard').hidden = false;
+    $('#maskEmpty').hidden = true;
+    renderHoleList();
+    updateHoleMessage();
     refreshLayerPanel();
+    loadLayerPreview();
+    fitCanvas();
   } catch (e) {
     setStatus(t('network_error') + e.message, 'err');
   }
@@ -597,13 +764,8 @@ async function generate() {
   fd.append('base', String(num($('#base'))));
   fd.append('color', String(num($('#color'))));
   fd.append('hole', String(num($('#hole'))));
-  const hx = $('#holeX').value.trim(), hy = $('#holeY').value.trim();
-  if (ringPlaced) {
-    fd.append('hole_x', ringPlaced.c.x.toFixed(2));
-    fd.append('hole_y', ringPlaced.c.y.toFixed(2));
-    fd.append('tab_outer_radius', ringPlaced.outer.toFixed(2));
-  } else if (hx !== '' || hy !== '') {
-    fd.append('hole_x', hx); fd.append('hole_y', hy);
+  if (holes.length) {
+    fd.append('holes', JSON.stringify(holes.map(h => [h.x, h.y, h.outer ?? null])));
   }
   fd.append('dark_threshold', String(int($('#darkThreshold'))));
   fd.append('alpha_threshold', String(int($('#alphaThreshold'))));
@@ -697,13 +859,16 @@ function applySource(file, name) {
   sourceName = name;
   sourceUrl = URL.createObjectURL(file);
   analysis = null;
-  ringPlaced = null;
-  setHoleTool(false);
-  $('#maskFrame').style.removeProperty('--ar');
-  $('#ringControls').hidden = true;
+  holeSeq = 1;
+  holes = []; selectedHoleId = null; basePoly = [];
+  setTool('select');
+  editorImg.src = '';
+  $('#holeCard').hidden = true;
+  $('#maskEmpty').hidden = false;
   $('#originalImg').src = sourceUrl;
   $('#originalPanel').hidden = false;
-  updateMaskPreview();
+  renderHoleList();
+  updateHoleMessage();
   $('#stageMeta').textContent = name;
   analyze();
 }
@@ -812,33 +977,38 @@ function init() {
   initTheme();
   initLanguage();
 
-  // layers (PS-style, preview-only) + hole tool + original panel + ring inputs
+  // layers (PS-style, preview-only) + editor canvas + tools + original + holes
   $('#layerBaseEye').addEventListener('click', onLayerToggle);
   $('#layerReliefEye').addEventListener('click', onLayerToggle);
-  $('#holeTool').addEventListener('click', () => setHoleTool(!holeToolActive));
-  $('#maskImg').addEventListener('pointerdown', onMaskPointerDown);
-  window.addEventListener('pointermove', onMaskPointerMove);
-  window.addEventListener('pointerup', endMaskDrag);
-  $('#ringClear').addEventListener('click', () => {
-    ringPlaced = null;
-    $('#holeX').value = ''; $('#holeY').value = ''; $('#ringOuter').value = '';
-    drawRing();
+  setupCanvas();
+  ['select', 'hole', 'eraser'].forEach(n => {
+    const b = $('#tool' + n.charAt(0).toUpperCase() + n.slice(1));
+    if (b) b.addEventListener('click', () => setTool(n));
   });
+  $('#zoomIn').addEventListener('click', () => zoomBy(1.2));
+  $('#zoomOut').addEventListener('click', () => zoomBy(1 / 1.2));
+  $('#zoomFit').addEventListener('click', fitCanvas);
   $('#originalToggle').addEventListener('click', () => {
     const body = $('#originalBody');
     const collapsed = body.style.display === 'none';
     body.style.display = collapsed ? '' : 'none';
-    $('#originalToggle').textContent = collapsed ? '−' : '+';
+    $('#originalToggleBody').textContent = collapsed ? '−' : '+';
+    const bt = $('#originalToggleBody'); bt.setAttribute('aria-expanded', String(collapsed));
+    $('#originalToggle').classList.toggle('is-active', collapsed);
   });
-  $('#holeX').addEventListener('input', fromRingInputs);
-  $('#holeY').addEventListener('input', fromRingInputs);
-  $('#ringOuter').addEventListener('input', fromRingInputs);
+  $('#originalToggleBody').addEventListener('click', () => $('#originalToggle').click());
+  $('#holeClear').addEventListener('click', clearHoles);
+  window.addEventListener('keydown', (e) => {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && activeTool === 'select' && e.target && e.target.tagName !== 'INPUT')
+      deleteSelectedHole();
+  });
+  window.addEventListener('resize', () => { if (analysis) fitCanvas(); });
 
   // params -> gauge
   bindPair('#width', '#widthRange', renderGauge);
   bindPair('#base', '#baseRange', renderGauge);
   bindPair('#color', '#colorRange', renderGauge);
-  bindPair('#hole', '#holeRange', () => { renderGauge(); fromRingInputs(); });
+  bindPair('#hole', '#holeRange', () => { renderGauge(); holes.forEach(h => { h.inner = num($('#hole')) / 2; }); recompute(); });
 
   // thresholds -> re-analyze (debounced)
   bindPair('#darkThreshold', '#darkThresholdRange', scheduleAnalyze);
