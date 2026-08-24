@@ -282,39 +282,25 @@ function renderCanvas() {
 
 function drawDimensions() {
   if (!analysis) return;
-  const W = canvas.width, H = canvas.height;
-  const c0 = toCanvas(0, 0), c1 = toCanvas(analysis.w_px, analysis.h_px);
+  const H = canvas.height;
   const scale = pxScaleMm();
   const widthMm = num($('#width'));
   const heightMm = analysis.h_px * scale;
+  const depthMm = num($('#base')) + num($('#color'));
   ictx.save();
-  ictx.strokeStyle = 'rgba(37,99,235,0.65)'; ictx.fillStyle = 'rgba(37,99,235,0.9)';
-  ictx.lineWidth = 1.2; ictx.font = '11px ui-monospace, monospace';
-  const pad = 16;
-  // horizontal dimension (model width) under the artwork
-  const hy = c1.y + pad;
-  ictx.setLineDash([4, 3]);
-  ictx.beginPath(); ictx.moveTo(c0.x, hy); ictx.lineTo(c1.x, hy); ictx.stroke();
-  ictx.setLineDash([]);
-  ictx.beginPath(); ictx.moveTo(c0.x, hy); ictx.lineTo(c0.x - 7, hy - 4); ictx.moveTo(c0.x, hy); ictx.lineTo(c0.x - 7, hy + 4); ictx.stroke();
-  ictx.beginPath(); ictx.moveTo(c1.x, hy); ictx.lineTo(c1.x + 7, hy - 4); ictx.moveTo(c1.x, hy); ictx.lineTo(c1.x + 7, hy + 4); ictx.stroke();
-  ictx.textAlign = 'right'; ictx.textBaseline = 'middle';
-  ictx.fillText(`${widthMm.toFixed(0)} mm`, c1.x - 4, hy);
-  // vertical dimension (model height) on the right
-  const vx = c1.x + pad;
-  ictx.setLineDash([4, 3]);
-  ictx.beginPath(); ictx.moveTo(vx, c0.y); ictx.lineTo(vx, c1.y); ictx.stroke();
-  ictx.setLineDash([]);
-  ictx.textAlign = 'left';
-  ictx.fillText(`${heightMm.toFixed(0)} mm`, vx + 4, (c0.y + c1.y) / 2);
-  // scale ruler (bottom-left): a fixed physical length, sized to the mm scale
+  const blue = 'rgba(37,99,235,0.88)';
+  ictx.fillStyle = blue; ictx.strokeStyle = blue; ictx.lineWidth = 1.4;
+  ictx.font = '12px ui-monospace, monospace';
+  // scale ruler (bottom-left) + a plain size readout beside it
   const tickMm = [2, 5, 10, 20, 50].find(m => (m / scale) * view.zoom > 20) || 50;
   const rulerPx = (tickMm / scale) * view.zoom;
   const rx = 14, ry = H - 16;
-  ictx.strokeStyle = 'rgba(37,99,235,0.8)';
+  ictx.textAlign = 'left'; ictx.textBaseline = 'bottom';
+  ictx.fillText(`${widthMm.toFixed(0)} × ${heightMm.toFixed(0)} × ${depthMm.toFixed(1)} mm`, rx, ry - 18);
   ictx.beginPath(); ictx.moveTo(rx, ry); ictx.lineTo(rx + rulerPx, ry); ictx.stroke();
   ictx.beginPath(); ictx.moveTo(rx, ry - 5); ictx.lineTo(rx, ry + 5); ictx.moveTo(rx + rulerPx, ry - 5); ictx.lineTo(rx + rulerPx, ry + 5); ictx.stroke();
-  ictx.fillText(`${tickMm} mm`, rx + rulerPx / 2, ry - 10);
+  ictx.textBaseline = 'top';
+  ictx.fillText(`${tickMm} mm`, rx + rulerPx + 6, ry - 5);
   ictx.restore();
 }
 
@@ -658,7 +644,6 @@ const I18N = {
     tool_select: 'Select', tool_eraser: 'Eraser', tool_draw: 'Draw (soon)',
     zoom_fit: 'Fit',
     snap: 'Magnetic', hole_pos_none: 'No hole selected', canvas_hint: 'scroll to zoom · drag to pan',
-    tool_hint: 'Click the artwork to punch a keychain hole — try a key ring',
     card_holes: 'Holes', new_hole_outer: 'New ring outer', hole_invalid: '⚠ cannot print — pick a position on the base',
     adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
     ring_outer: 'Ring outer', ring_clear: 'Clear ring',
@@ -724,7 +709,6 @@ const I18N = {
     tool_select: '选择', tool_eraser: '橡皮擦', tool_draw: '画图形（即将）',
     zoom_fit: '适应',
     snap: '磁性', hole_pos_none: '未选中孔', canvas_hint: '滚轮缩放 · 拖拽平移',
-    tool_hint: '点一下想打孔的位置 = 打一个钥匙孔，试试打孔做成钥匙扣',
     card_holes: '孔', new_hole_outer: '新挂耳外径', hole_invalid: '⚠ 无法打印——请在底板上选位置',
     adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
     ring_outer: '外圆', ring_clear: '清除圆环',
@@ -1064,8 +1048,6 @@ function init() {
     const b = $('#tool' + n.charAt(0).toUpperCase() + n.slice(1));
     if (b) b.addEventListener('click', () => setTool(n));
   });
-  $('#toolHole').addEventListener('mouseenter', () => { if (analysis) $('#toolHint').hidden = false; });
-  $('#toolHole').addEventListener('mouseleave', () => { $('#toolHint').hidden = true; });
   $('#zoomIn').addEventListener('click', () => zoomBy(1.2));
   $('#zoomOut').addEventListener('click', () => zoomBy(1 / 1.2));
   $('#zoomFit').addEventListener('click', fitCanvas);

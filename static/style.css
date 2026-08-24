@@ -492,12 +492,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   padding: 7px 12px; color: var(--ink-dim); font-size: 12px; pointer-events: none; max-width: 90%;
 }
 .hole-message.bad { color: #e03e3e; border-color: #e03e3e; }
-.tool-hint {
-  position: absolute; left: 50%; top: 38px; transform: translateX(-50%);
-  background: var(--accent); color: #fff; border-radius: 999px;
-  padding: 7px 14px; font-size: 13px; pointer-events: none; max-width: 92%;
-  box-shadow: var(--shadow);
-}
 .editor-bottom { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .editor-bottom .spacer { flex: 1; }
 .hole-pos { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 5px 10px; }
