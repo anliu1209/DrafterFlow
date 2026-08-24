@@ -903,6 +903,7 @@ function applySource(file, name) {
   $('#holeCard').hidden = true;
   $('#maskEmpty').hidden = false;
   $('#originalImg').src = sourceUrl;
+  $('#origThumb').hidden = false;
   renderHoleList();
   updateHoleMessage();
   $('#stageMeta').textContent = name;
