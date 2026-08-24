@@ -284,7 +284,7 @@ function drawDimensions() {
   if (!analysis) return;
   const H = canvas.height;
   const scale = pxScaleMm();
-  const widthMm = num($('#width'));
+  const widthMm = analysis.w_px * scale;
   const heightMm = analysis.h_px * scale;
   const depthMm = num($('#base')) + num($('#color'));
   ictx.save();
