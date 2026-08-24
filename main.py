@@ -1,5 +1,6 @@
-"""CLI entry point: transparent PNG -> two-layer keychain STL."""
+"""CLI entry point: transparent / white-background PNG -> two-layer keychain STL."""
 import argparse
+import os
 import sys
 
 from export import export_stl
@@ -10,9 +11,9 @@ from vectorize import base_polygons, color_polygons
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
-        description="Convert a transparent-background PNG into a two-layer printable keychain STL."
+        description="Convert a transparent or white-background image into a two-layer printable keychain STL."
     )
-    p.add_argument("input", help="input PNG (RGBA with transparency)")
+    p.add_argument("input", help="input image (PNG/JPG; transparent or white background)")
     p.add_argument("output", help="output .stl path")
     p.add_argument("--width", type=float, default=50.0, help="max model width in mm (default: 50)")
     p.add_argument("--base", type=float, default=1.2, help="base thickness in mm (default: 1.2)")
@@ -22,6 +23,23 @@ def _build_arg_parser():
     p.add_argument("--hole-y", type=float, default=None, help="override hole center Y in mm")
     p.add_argument("--dark-threshold", type=int, default=100, help="grayscale dark threshold 0-255 (default: 100)")
     p.add_argument("--alpha-threshold", type=int, default=8, help="alpha threshold 0-255 (default: 8)")
+    p.add_argument(
+        "--background",
+        choices=("auto", "white", "transparent"),
+        default="auto",
+        help="background mode: auto-detect, force white-background, or force transparent (default: auto)",
+    )
+    p.add_argument(
+        "--bg-distance",
+        type=float,
+        default=45.0,
+        help="colour-distance threshold for white-background silhouette detection (default: 45)",
+    )
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="write diagnostic PNGs (original / silhouette / dark masks) next to the output",
+    )
     return p
 
 
@@ -32,9 +50,19 @@ def main(argv=None):
         print("Error: --hole-x and --hole-y must be given together.", file=sys.stderr)
         return 1
 
+    debug_dir = None
+    if args.debug:
+        debug_dir = os.path.splitext(args.output)[0] + "_debug"
+
     try:
         base_mask, color_mask, (h_px, w_px) = extract_masks(
-            args.input, args.alpha_threshold, args.dark_threshold
+            args.input,
+            args.alpha_threshold,
+            args.dark_threshold,
+            background=args.background,
+            background_distance_threshold=args.bg_distance,
+            debug=args.debug,
+            debug_dir=debug_dir,
         )
     except ImageProcessingError as exc:
         print(str(exc), file=sys.stderr)
