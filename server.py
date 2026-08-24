@@ -39,7 +39,7 @@ COLOR_RGB = (37, 99, 235)    # blue -> raised dark layer
 
 # Example images offered as one-click sources. Mapped id -> (label, path).
 EXAMPLES = {
-    "txt": ("Frame & text", BASE_DIR / "examples" / "txt.png"),
+    "nametag": ("Nametag", BASE_DIR / "examples" / "nametag.png"),
     "heart": ("Heart", BASE_DIR / "examples" / "heart.png"),
     "qban": ("Line art", BASE_DIR / "Q版测试.png"),
 }
