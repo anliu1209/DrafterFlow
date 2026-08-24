@@ -189,8 +189,8 @@ async def analyze(
 async def generate(
     file: UploadFile = File(...),
     width: str = Form("50"),
-    base: str = Form("1.2"),
-    color: str = Form("0.6"),
+    base: str = Form("4"),
+    color: str = Form("2"),
     hole: str = Form("4"),
     hole_x: str | None = Form(None),
     hole_y: str | None = Form(None),
@@ -205,8 +205,8 @@ async def generate(
         raise HTTPException(400, "上传内容为空。")
 
     width_mm = _num(width, 50.0, "宽度")
-    base_th = _num(base, 1.2, "底板厚度")
-    color_th = _num(color, 0.6, "深色层厚度")
+    base_th = _num(base, 4.0, "底板厚度")
+    color_th = _num(color, 2.0, "深色层厚度")
     hole_d = _num(hole, 4.0, "孔直径")
     tab_r = _num(tab_outer_radius, None, "挂耳半径") if tab_outer_radius not in (None, "") else None
     dark = _int(dark_threshold, 100, "深色阈值")

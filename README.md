@@ -29,7 +29,7 @@ python main.py 你的图.png output/xxx.stl --base 4 --color 2
 
 ## 双色打印
 
-生成**单个 STL**。切片时在「底板厚度」处换料（默认 1.2mm，用 `--base` 改）：
+生成**单个 STL**。切片时在「底板厚度」处换料（默认底板 4mm + 浮雕 2mm = 总高 6mm，用 `--base`/`--color` 改）：
 
 - 0–`--base` mm 打浅色（底板）
 - `--base`–(`--base`+`--color`) mm 打深色（凸起图案）

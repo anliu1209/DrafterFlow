@@ -79,7 +79,7 @@ Boolean operations use `engine="manifold"` throughout `model_builder.py` (union 
 
 ## Known design decisions
 
-- Base thickness 1.2 mm, color layer 0.6 mm — chosen because 0.2 mm is too close to typical FDM layer height; `--color` still allows override.
+- Base thickness 4 mm, color layer 2 mm (total 6 mm) — a realistic all-around keychain default; a ~1 mm plate is too thin to print confidently. `--base`/`--color` still allow override.
 - `alpha_threshold` defaults to 8 (not 0) to reject semi-transparent specks from the silhouette.
 - 3MF export (dual-material) is deferred to a later version; the internal `base_solid`/`color_solid` split was kept in DEVDOC for that future reuse but the current code exports a single unioned mesh.
 - The 3D preview uses **flat shading** (not smooth normals) so the 90° base/relief edge stays crisp; smooth normals rounded the relief into a "blob". The curved-silhouette jaggies are addressed at the geometry level in `vectorize.py` by vectorizing with **potrace** (`_potrace_polys`), which fits smooth cubic bezier curves straight to the mask — no pixel staircase. This adds `potracer` (GPLv2+, copyleft — see `THIRD_PARTY_NOTICES.md`). `POTRACE_ALPHAMAX` / `POTRACE_OPTTOLERANCE` / `POTRACE_PER_SEG` are tunable; potrace produces smoother curves but generates more mesh faces (larger STLs) on dense line art than the splprep fallback path.
