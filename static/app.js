@@ -16,6 +16,7 @@ let holes = [];             // [{id, x, y, outer, inner, valid}] in mm
 let activeTool = 'select';  // select | hole | eraser | draw (later)
 let selectedHoleId = null;
 let holeSeq = 1;
+let defaultHoleSeeded = false;  // auto-hole placed once per source; stays true if user deletes it
 let snapEnabled = true;     // magnetic snapping
 let undoStack = [], redoStack = [];
 let basePoly = [];          // base silhouette rings, image px (from analysis.base_poly)
@@ -659,7 +660,7 @@ const I18N = {
     snap: 'Magnetic', hole_pos_none: 'No hole selected', canvas_hint: 'scroll to zoom · drag to pan',
     card_holes: 'Holes', new_hole_outer: 'New ring outer', hole_invalid: '⚠ cannot print — pick a position on the base', hole_reset: 'Reset position',
     adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
-    ring_outer: 'Ring outer', ring_clear: 'Clear ring',
+    ring_outer: 'Ring outer', ring_clear: 'Clear ring', hole_none: 'no keyhole',
     mask_empty: 'Upload a drawing to preview its layers', vp_empty: 'Your 3D model appears here', vp_hint: 'Rotate · zoom · pan', vp_reset: 'Reset view',
     how_eyebrow: 'Under the hood', how_title: 'How it works', how_sub: 'A drawing goes through a real geometry pipeline — computer vision to manufacturable mesh.',
     how1_t: 'Input image', how1_b: 'A transparent-background PNG with dark line work.',
@@ -724,7 +725,7 @@ const I18N = {
     snap: '磁性', hole_pos_none: '未选中孔', canvas_hint: '滚轮缩放 · 拖拽平移',
     card_holes: '孔', new_hole_outer: '新挂耳外径', hole_invalid: '⚠ 无法打印——请在底板上选位置', hole_reset: '重置位置',
     adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
-    ring_outer: '外圆', ring_clear: '清除圆环',
+    ring_outer: '外圆', ring_clear: '清除圆环', hole_none: '无钥匙孔',
     mask_empty: '上传图片以预览分层', vp_empty: '3D 模型会显示在这里', vp_hint: '旋转 · 缩放 · 平移', vp_reset: '重置视角',
     how_eyebrow: '底层原理', how_title: '它是怎么工作的', how_sub: '一张画会经过一条真实的几何流水线——从计算机视觉到可制造的网格。',
     how1_t: '输入图片', how1_b: '一张透明背景、深色线稿的 PNG。',
@@ -809,6 +810,8 @@ async function analyze() {
   fd.append('file', sourceFile, 'upload.png');
   fd.append('dark_threshold', String(int($('#darkThreshold'))));
   fd.append('alpha_threshold', String(int($('#alphaThreshold'))));
+  fd.append('width', String(num($('#width'))));
+  fd.append('hole', String(num($('#hole'))));
   fd.append('base_color', baseHex());
   fd.append('color_color', colorHex());
   try {
@@ -818,12 +821,20 @@ async function analyze() {
     analysis = data;
     $('#stageMeta').textContent = `${data.w_px} × ${data.h_px} ${t('px')}`;
     basePoly = data.base_poly || [];
-    holes = []; selectedHoleId = null;
+    // Auto-place the default keyhole on the canvas once per source (a fresh source
+    // starts with no holes). Re-analyzes keep existing holes so adjusting a threshold
+    // or colour doesn't discard the user's placement.
+    if (!defaultHoleSeeded) {
+      if (data.default_hole) {
+        const r = num($('#hole')) / 2;
+        holes.push({ id: holeSeq++, x: data.default_hole[0], y: data.default_hole[1], outer: null, inner: r, valid: true });
+        selectedHoleId = holes[holes.length - 1].id;
+      }
+      defaultHoleSeeded = true;
+    }
     $('#holeCard').hidden = false;
     $('#maskEmpty').hidden = true;
-    renderHoleList();
-    updateHoleMessage();
-    updateHolePos();
+    recompute();
     refreshLayerPanel();
     loadLayerPreview();
     fitCanvas();
@@ -840,9 +851,8 @@ async function generate() {
   fd.append('base', String(num($('#base'))));
   fd.append('color', String(num($('#color'))));
   fd.append('hole', String(num($('#hole'))));
-  if (holes.length) {
-    fd.append('holes', JSON.stringify(holes.map(h => [h.x, h.y, h.outer ?? null])));
-  }
+  // Always send the placements; an empty array means "no keyhole".
+  fd.append('holes', JSON.stringify(holes.map(h => [h.x, h.y, h.outer ?? null])));
   fd.append('dark_threshold', String(int($('#darkThreshold'))));
   fd.append('alpha_threshold', String(int($('#alphaThreshold'))));
 
@@ -870,12 +880,15 @@ async function generate() {
 
     const total = num($('#base')) + num($('#color'));
     let msg = t('done') + ' · ' + fmtSize(blob.size);
-    if (holeCenter) msg += ' · ' + t('hole') + ` (${holeCenter[0].toFixed(1)}, ${holeCenter[1].toFixed(1)})`;
-    setStatus(msg, 'ok');
     if (holeCenter) {
+      msg += ' · ' + t('hole') + ` (${holeCenter[0].toFixed(1)}, ${holeCenter[1].toFixed(1)})`;
       $('#vpInfo').innerHTML =
         `${t('hole')} <b>(${holeCenter[0].toFixed(1)}, ${holeCenter[1].toFixed(1)})</b> mm · ${t('depth')} <b>${total.toFixed(1)}</b> mm`;
+    } else {
+      msg += ' · ' + t('hole_none');
+      $('#vpInfo').innerHTML = `${t('depth')} <b>${total.toFixed(1)}</b> mm · ${t('hole_none')}`;
     }
+    setStatus(msg, 'ok');
     return true;
   } catch (e) {
     stopPipeline();
@@ -937,6 +950,7 @@ function applySource(file, name) {
   analysis = null;
   holeSeq = 1;
   holes = []; selectedHoleId = null; basePoly = [];
+  defaultHoleSeeded = false;
   setTool('select');
   editorImg.src = '';
   $('#holeCard').hidden = true;
@@ -970,7 +984,7 @@ function hideModal() { $('#modal').hidden = true; }
 // ---------- hero + gallery ----------
 async function initHero() {
   try {
-    const r = await fetch('/api/examples/txt');
+    const r = await fetch('/api/examples/nametag');
     const blob = await r.blob();
     const orig = $('#heroOriginal');
     if (orig) orig.src = URL.createObjectURL(blob);

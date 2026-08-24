@@ -14,7 +14,7 @@ digital fabrication 的一次探索。
 ## 用法
 
 ```bash
-python main.py examples/txt.png output/txt.stl
+python main.py examples/nametag.png output/nametag.stl
 python main.py examples/heart.png output/heart.stl --width 50
 ```
 

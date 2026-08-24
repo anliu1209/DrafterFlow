@@ -21,6 +21,7 @@ def _build_arg_parser():
     p.add_argument("--hole", type=float, default=4.0, help="keychain hole diameter in mm (default: 4)")
     p.add_argument("--hole-x", type=float, default=None, help="override hole center X in mm")
     p.add_argument("--hole-y", type=float, default=None, help="override hole center Y in mm")
+    p.add_argument("--no-hole", action="store_true", help="generate without a keychain hole")
     p.add_argument("--dark-threshold", type=int, default=100, help="grayscale dark threshold 0-255 (default: 100)")
     p.add_argument("--alpha-threshold", type=int, default=8, help="alpha threshold 0-255 (default: 8)")
     p.add_argument(
@@ -48,6 +49,9 @@ def main(argv=None):
 
     if (args.hole_x is None) != (args.hole_y is None):
         print("Error: --hole-x and --hole-y must be given together.", file=sys.stderr)
+        return 1
+    if args.no_hole and (args.hole_x is not None or args.hole_y is not None):
+        print("Error: --no-hole cannot be combined with --hole-x/--hole-y.", file=sys.stderr)
         return 1
 
     debug_dir = None
@@ -82,6 +86,7 @@ def main(argv=None):
             color_thickness=args.color,
             hole_diameter=args.hole,
             hole_position=hole_position,
+            holes=[] if args.no_hole else None,
         )
     except ModelBuildError as exc:
         print(str(exc), file=sys.stderr)
@@ -89,7 +94,10 @@ def main(argv=None):
 
     out = export_stl(mesh, args.output)
     print(f"Wrote {out}")
-    print(f"Hole center (mm): x={hole_center[0]:.2f}, y={hole_center[1]:.2f}")
+    if hole_center is None:
+        print("No keychain hole")
+    else:
+        print(f"Hole center (mm): x={hole_center[0]:.2f}, y={hole_center[1]:.2f}")
     return 0
 
 

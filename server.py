@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from export import export_stl
 from image_processing import ImageProcessingError, extract_masks
-from model_builder import ModelBuildError, build_model
+from model_builder import ModelBuildError, build_model, compute_default_hole
 from vectorize import base_polygons, color_polygons
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -139,6 +139,8 @@ async def analyze(
     file: UploadFile = File(...),
     dark_threshold: str = Form("100"),
     alpha_threshold: str = Form("8"),
+    width: str = Form("50"),
+    hole: str = Form("4"),
     base_color: str = Form("#ffffff"),
     color_color: str = Form("#2563eb"),
 ):
@@ -149,6 +151,8 @@ async def analyze(
 
     dark = _int(dark_threshold, 100, "深色阈值")
     alpha = _int(alpha_threshold, 8, "透明阈值")
+    width_mm = _num(width, 50.0, "宽度")
+    hole_d = _num(hole, 4.0, "孔直径")
     base_rgb = _hex_rgb(base_color, BASE_RGB)
     color_rgb = _hex_rgb(color_color, COLOR_RGB)
 
@@ -161,15 +165,18 @@ async def analyze(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
         filled_base = _filled_base_mask(base_mask)
+        base_polys = base_polygons(base_mask)
+        color_polys = color_polygons(color_mask)
         base_sum = int(filled_base.sum())
         color_sum = int(color_mask.sum())
         dark_ratio = round(color_sum / base_sum, 4) if base_sum else 0.0
         # Base silhouette exterior rings (pixel space, y-down) so the frontend can
         # judge whether a placed ring overlaps the base (printable) or floats outside.
         base_rings = []
-        for poly in base_polygons(base_mask):
+        for poly in base_polys:
             for g in (getattr(poly, "geoms", [poly])):
                 base_rings.append([[round(float(x), 2), round(float(y), 2)] for x, y in g.exterior.coords])
+        default_hole = compute_default_hole(base_polys, color_polys, w_px, h_px, width_mm, hole_d)
         return {
             "ok": True,
             "w_px": w_px,
@@ -179,6 +186,7 @@ async def analyze(
             "combined_png": _combined_png(filled_base, color_mask, base_rgb, color_rgb),
             "dark_ratio": dark_ratio,
             "clearance_disabled": dark_ratio >= 0.85,
+            "default_hole": [default_hole[0], default_hole[1]] if default_hole else None,
             "base_poly": base_rings,
         }
     finally:
@@ -237,7 +245,7 @@ async def generate(
             base_mask, color_mask, (h_px, w_px) = extract_masks(path, alpha, dark)
             base_polys = base_polygons(base_mask)
             color_polys = color_polygons(color_mask)
-            if holes_list:
+            if holes_list is not None:
                 mesh, hole_center = build_model(
                     base_polys, color_polys, w_px, h_px,
                     width_mm=width_mm, base_thickness=base_th, color_thickness=color_th,
@@ -261,8 +269,9 @@ async def generate(
 
         headers = {
             "Content-Disposition": 'attachment; filename="keychain.stl"',
-            "X-Hole-Center": f"{hole_center[0]:.3f},{hole_center[1]:.3f}",
         }
+        if hole_center is not None:
+            headers["X-Hole-Center"] = f"{hole_center[0]:.3f},{hole_center[1]:.3f}"
         return Response(stl_bytes, media_type="model/stl", headers=headers)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

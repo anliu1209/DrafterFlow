@@ -17,6 +17,7 @@ class ModelBuildError(Exception):
 DEFAULT_MARGIN = 3.0       # mm, hole top -> part top edge
 DEFAULT_MIN_EDGE = 2.0     # mm, hole -> outer contour min wall
 DEFAULT_CLEARANCE = 1.0    # mm, hole -> dark artwork clearance
+EXTRUDE_BUFFER_EPS = 0.001  # mm, hairline rounding that snaps a degenerate outline into a solid volume
 
 
 def _scale_and_center(poly, scale, w_px, h_px):
@@ -27,12 +28,31 @@ def _scale_and_center(poly, scale, w_px, h_px):
     )
 
 
+def _extrude_poly(poly, height):
+    """Extrude a single Polygon, rounding by a hair if ear-clipping fails to close it.
+
+    A thin ring (e.g. a frame with an interior hole) can triangulate into a
+    non-volume mesh; a 1 µm positive buffer snaps it into a clean solid.
+    """
+    mesh = trimesh.creation.extrude_polygon(poly, height)
+    if mesh.is_volume:
+        return mesh
+    rounded = poly.buffer(EXTRUDE_BUFFER_EPS)
+    if isinstance(rounded, Polygon):
+        return trimesh.creation.extrude_polygon(rounded, height)
+    if isinstance(rounded, MultiPolygon):
+        parts = [trimesh.creation.extrude_polygon(g, height) for g in rounded.geoms]
+        if parts:
+            return trimesh.util.concatenate(parts)
+    raise ModelBuildError("Failed to construct the 3D model: degenerate geometry.")
+
+
 def _extrude(geom, height):
     """Extrude a shapely Polygon/MultiPolygon into a trimesh, Z in [0, height]."""
     if isinstance(geom, Polygon):
-        return trimesh.creation.extrude_polygon(geom, height)
+        return _extrude_poly(geom, height)
     if isinstance(geom, MultiPolygon):
-        parts = [trimesh.creation.extrude_polygon(g, height) for g in geom.geoms]
+        parts = [_extrude_poly(g, height) for g in geom.geoms]
         if not parts:
             raise ModelBuildError("Failed to construct the 3D model: empty geometry.")
         return trimesh.util.concatenate(parts)
@@ -97,6 +117,54 @@ def find_hole_center(base_union, color_union, hole_radius, margin=DEFAULT_MARGIN
     )
 
 
+def _prepare_geometries(base_polys, color_polys, w_px, h_px, width_mm):
+    """Scale to mm and union the base/colour layers, clipping colour to the base.
+
+    Shared by `build_model` and `compute_default_hole` so the hole-placement logic stays
+    identical in both. Returns (base_union, color_union) in mm coordinates.
+    """
+    scale = width_mm / max(w_px, h_px)
+    base_union = (
+        unary_union([_scale_and_center(p, scale, w_px, h_px) for p in base_polys])
+        if base_polys else GeometryCollection()
+    )
+    color_union = (
+        unary_union([_scale_and_center(p, scale, w_px, h_px) for p in color_polys])
+        if color_polys else GeometryCollection()
+    )
+    if not color_union.is_empty:
+        parts = _polygon_parts(color_union.intersection(base_union))
+        color_union = unary_union(parts) if parts else GeometryCollection()
+    return base_union, color_union
+
+
+def compute_default_hole(base_polys, color_polys, w_px, h_px, width_mm, hole_diameter,
+                         margin=DEFAULT_MARGIN, min_edge=DEFAULT_MIN_EDGE):
+    """Return the auto-placed keyhole centre (mm) without building the mesh.
+
+    Mirrors the single-hole fallback in `build_model`: skip the colour clearance for
+    solid-dark art, then retry without any clearance. Returns (x, y) or None if no
+    structurally-safe spot exists.
+    """
+    base_union, color_union = _prepare_geometries(base_polys, color_polys, w_px, h_px, width_mm)
+    if base_union.is_empty:
+        return None
+    hole_radius = hole_diameter / 2.0
+    ratio = (color_union.area / base_union.area) if not color_union.is_empty else 0.0
+    clearance = DEFAULT_CLEARANCE if ratio < 0.85 else None
+    try:
+        return find_hole_center(base_union, color_union, hole_radius,
+                                margin=margin, min_edge=min_edge, clearance=clearance)
+    except ModelBuildError:
+        if clearance is None:
+            return None
+        try:
+            return find_hole_center(base_union, color_union, hole_radius,
+                                    margin=margin, min_edge=min_edge, clearance=None)
+        except ModelBuildError:
+            return None
+
+
 def build_model(
     base_polys,
     color_polys,
@@ -114,28 +182,14 @@ def build_model(
 
     `holes` is a list of (hx, hy, outer_radius) in mm and takes priority; each gets a
     base-coloured hang-tab when `outer_radius > hole_radius`, then an inner through-hole
-    is cut. `hole_position`/`tab_outer_radius` remain as the single-hole form. When none
-    are set the hole is auto-placed.
+    is cut. `holes=[]` explicitly means **no keyhole** (returns `hole_center_mm=None`).
+    `hole_position`/`tab_outer_radius` remain as the single-hole form. When none are set
+    the hole is auto-placed.
     """
-    scale = width_mm / max(w_px, h_px)
-
-    base_polys_mm = [_scale_and_center(p, scale, w_px, h_px) for p in base_polys]
-    color_polys_mm = [_scale_and_center(p, scale, w_px, h_px) for p in color_polys]
-
-    base_union = unary_union(base_polys_mm) if base_polys_mm else GeometryCollection()
-    color_union = unary_union(color_polys_mm) if color_polys_mm else GeometryCollection()
+    base_union, color_union = _prepare_geometries(base_polys, color_polys, w_px, h_px, width_mm)
 
     if base_union.is_empty:
         raise ModelBuildError("Failed to construct the 3D model: empty base geometry.")
-
-    # The color layer is vectorized and smoothed independently of the base, so its
-    # outer edge can drift past the base boundary (e.g. at the rounded corners of a
-    # frame). Clip it to the base so the boolean union stays manifold. The clip can
-    # leave degenerate line/point slivers at coincident boundaries; keep only 2D
-    # polygon parts.
-    if not color_union.is_empty:
-        parts = _polygon_parts(color_union.intersection(base_union))
-        color_union = unary_union(parts) if parts else GeometryCollection()
 
     hole_radius = hole_diameter / 2.0
 
@@ -153,8 +207,10 @@ def build_model(
     else:
         merged = base_mesh
 
-    # Normalise hole input to a list of (hx, hy, outer) in mm.
-    if holes:
+    # Normalise hole input to a list of (hx, hy, outer) in mm. `holes` uses the list
+    # as-is (including an empty list = no hole); otherwise fall back to the single-hole
+    # form, or None = auto-place.
+    if holes is not None:
         hole_list = [
             (float(x), float(y), (float(o) if o is not None else None))
             for (x, y, o) in holes
@@ -168,8 +224,21 @@ def build_model(
 
     total_height = base_thickness + color_thickness
 
-    if hole_list is not None:
-        # Union all hang-tabs first (base-coloured), then cut every inner hole.
+    if hole_list is None:
+        # Auto-place a single structural hole (and fall back to clearance=None for
+        # dense artwork where the hole cannot avoid the dark layer).
+        try:
+            hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=clearance)
+        except ModelBuildError:
+            if clearance is None:
+                raise
+            hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=None)
+        cylinder = trimesh.creation.cylinder(radius=hole_radius, height=total_height + 4.0, sections=64)
+        cylinder.apply_translation([hx, hy, total_height / 2.0])
+        final = trimesh.boolean.difference([merged, cylinder], engine="manifold")
+        hole_center = (hx, hy)
+    elif hole_list:
+        # Explicit holes: union all hang-tabs first (base-coloured), then cut inner holes.
         tabs = []
         for hx, hy, outer in hole_list:
             if outer is not None and outer > hole_radius:
@@ -186,17 +255,8 @@ def build_model(
         final = trimesh.boolean.difference([merged] + cutters, engine="manifold")
         hole_center = (hole_list[0][0], hole_list[0][1])
     else:
-        try:
-            hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=clearance)
-        except ModelBuildError:
-            # Dense artwork may have no spot clear of the dark layer; fall back to
-            # a structurally-safe hole (min_edge only) that may cut through dark art.
-            if clearance is None:
-                raise
-            hx, hy = find_hole_center(base_union, color_union, hole_radius, clearance=None)
-        cylinder = trimesh.creation.cylinder(radius=hole_radius, height=total_height + 4.0, sections=64)
-        cylinder.apply_translation([hx, hy, total_height / 2.0])
-        final = trimesh.boolean.difference([merged, cylinder], engine="manifold")
-        hole_center = (hx, hy)
+        # holes == [] -> no keyhole.
+        final = merged
+        hole_center = None
 
     return final, hole_center
