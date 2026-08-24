@@ -482,6 +482,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 [data-theme="dark"] .canvas-wrap { background: #1c1b22; }
 #editorCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
 #editorCanvas.is-placement { cursor: crosshair; }
+#editorCanvas, #threeCanvas, .canvas-wrap, .tools, .editor-head, .editor-bottom {
+  -webkit-user-select: none; user-select: none; -webkit-user-drag: none;
+}
+.layer-thumb, .orig-thumb img, img { -webkit-user-drag: none; }
 .hole-message {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm);
