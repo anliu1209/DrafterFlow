@@ -1,6 +1,15 @@
 # fan-object-generator
 
-透明背景 PNG → 双层钥匙扣 STL 生成器（V1.0 MVP）。
+透明背景 PNG → 多层 3D 打印钥匙扣 STL 生成器。
+
+最初只是为了把我画的李羲承（Heeseung）Q版同人图做成一个真正的 3D 打印钥匙扣。手动在
+Onshape 里描轮廓太耗时、难扩展，于是我把这个过程程序化了：从透明背景 2D 线稿自动提取轮廓
+与图案区域 → 转成矢量几何 → 生成可直接 3D 打印的多层模型。
+
+**Draw it → Upload it → Print it.**
+
+从一张喜欢的同人图开始，逐渐变成对 computer vision、computational geometry、CAD 与
+digital fabrication 的一次探索。
 
 ## 用法
 

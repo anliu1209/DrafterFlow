@@ -139,8 +139,8 @@ async def analyze(
     file: UploadFile = File(...),
     dark_threshold: str = Form("100"),
     alpha_threshold: str = Form("8"),
-    base_color: str = Form("#c6bcab"),
-    color_color: str = Form("#e8a33d"),
+    base_color: str = Form("#ffffff"),
+    color_color: str = Form("#2563eb"),
 ):
     """Return the base/colour masks as PNGs so the user can see what will be built."""
     data = await file.read()
