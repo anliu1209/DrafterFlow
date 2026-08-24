@@ -785,6 +785,7 @@ async function analyze() {
     $('#maskEmpty').hidden = true;
     renderHoleList();
     updateHoleMessage();
+    updateHolePos();
     refreshLayerPanel();
     loadLayerPreview();
     fitCanvas();
