@@ -490,8 +490,24 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm);
   padding: 7px 12px; color: var(--ink-dim); font-size: 12px; pointer-events: none; max-width: 90%;
+  display: flex; align-items: center; gap: 10px;
 }
 .hole-message.bad { color: #e03e3e; border-color: #e03e3e; }
+.hole-reset {
+  pointer-events: auto; border: 1px solid #e03e3e; background: transparent; color: #e03e3e;
+  border-radius: 999px; padding: 4px 11px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  transition: transform .06s ease, background .12s ease, color .12s ease;
+}
+.hole-reset:hover { background: #e03e3e; color: #fff; }
+.hole-reset:active { transform: scale(0.96); }
+.hole-message.shake { animation: holeShake .38s ease; }
+@keyframes holeShake {
+  0%, 100% { transform: translateX(-50%); }
+  20% { transform: translateX(calc(-50% - 6px)); }
+  40% { transform: translateX(calc(-50% + 6px)); }
+  60% { transform: translateX(calc(-50% - 4px)); }
+  80% { transform: translateX(calc(-50% + 4px)); }
+}
 .editor-bottom { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .editor-bottom .spacer { flex: 1; }
 .hole-pos { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 5px 10px; }

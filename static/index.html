@@ -241,7 +241,10 @@
           <div class="canvas-wrap" id="canvasWrap">
             <canvas id="editorCanvas" draggable="false"></canvas>
             <div class="canvas-hint"><span data-i18n="canvas_hint">scroll to zoom · drag to pan</span></div>
-            <div class="hole-message" id="holeMessage" hidden></div>
+            <div class="hole-message" id="holeMessage" hidden>
+              <span id="holeMessageText"></span>
+              <button class="hole-reset" id="holeReset" type="button"><span data-i18n="hole_reset">Reset position</span></button>
+            </div>
             <div class="empty" id="maskEmpty" data-i18n="mask_empty">Upload a drawing to preview its layers</div>
           </div>
 
