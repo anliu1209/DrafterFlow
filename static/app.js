@@ -296,7 +296,7 @@ function drawDimensions() {
   const rulerPx = (tickMm / scale) * view.zoom;
   const rx = 14, ry = H - 16;
   ictx.textAlign = 'left'; ictx.textBaseline = 'bottom';
-  ictx.fillText(`${widthMm.toFixed(0)} × ${heightMm.toFixed(0)} × ${depthMm.toFixed(1)} mm`, rx, ry - 18);
+  ictx.fillText(`${widthMm.toFixed(2)} × ${heightMm.toFixed(2)} × ${depthMm.toFixed(2)} mm`, rx, ry - 18);
   ictx.beginPath(); ictx.moveTo(rx, ry); ictx.lineTo(rx + rulerPx, ry); ictx.stroke();
   ictx.beginPath(); ictx.moveTo(rx, ry - 5); ictx.lineTo(rx, ry + 5); ictx.moveTo(rx + rulerPx, ry - 5); ictx.lineTo(rx + rulerPx, ry + 5); ictx.stroke();
   ictx.textBaseline = 'top';
