@@ -339,7 +339,7 @@ function updateHolePos() {
   if (!el) return;
   const sel = holes.find(h => h.id === selectedHoleId);
   el.textContent = sel ? `X ${sel.x.toFixed(1)} · Y ${sel.y.toFixed(1)}` : t('hole_pos_none');
-  el.classList.toggle('empty', !sel);
+  el.classList.toggle('muted', !sel);
   // Magnetic toggle appears only when a ring is selected; the Outer field edits it.
   const sm = $('#snapToggle');
   if (sm) {
