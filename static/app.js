@@ -340,6 +340,17 @@ function updateHolePos() {
   const sel = holes.find(h => h.id === selectedHoleId);
   el.textContent = sel ? `X ${sel.x.toFixed(1)} · Y ${sel.y.toFixed(1)}` : t('hole_pos_none');
   el.classList.toggle('empty', !sel);
+  // Magnetic toggle appears only when a ring is selected; the Outer field edits it.
+  const sm = $('#snapToggle');
+  if (sm) {
+    sm.hidden = !sel;
+    if (sel) {
+      sm.classList.toggle('is-active', snapEnabled);
+      sm.setAttribute('aria-pressed', String(snapEnabled));
+    }
+  }
+  const ho = $('#newHoleOuter');
+  if (ho && sel && document.activeElement !== ho) ho.value = sel.outer != null ? sel.outer : '';
 }
 
 function updateHoleMessage() {
@@ -370,6 +381,8 @@ function hitHole(cx, cy) {
 function onCanvasPointerDown(evt) {
   if (!analysis) return;
   const p = canvasPoint(evt);
+  // middle-drag always pans
+  if (evt.button === 1) { evt.preventDefault(); dragState = { type: 'pan', sx: p.x, sy: p.y, ox: view.ox, oy: view.oy }; return; }
   if (activeTool === 'hole') {
     const existing = hitHole(p.x, p.y);
     if (existing) { selectedHoleId = existing.id; recompute(); return; }  // select an existing ring, don't stack/move
@@ -605,7 +618,7 @@ const I18N = {
     tool_hole: 'Hole',
     tool_select: 'Select', tool_eraser: 'Eraser', tool_draw: 'Draw (soon)',
     zoom_fit: 'Fit',
-    snap: 'Snap', hole_pos_none: 'No hole selected',
+    snap: 'Magnetic', hole_pos_none: 'No hole selected', canvas_hint: 'scroll to zoom · drag to pan',
     card_holes: 'Holes', new_hole_outer: 'New ring outer', hole_invalid: '⚠ cannot print — pick a position on the base',
     adv_ring: 'Hang-tab outer radius', adv_ring_hint: 'ring outer edge; leave blank = no tab',
     ring_outer: 'Ring outer', ring_clear: 'Clear ring',
@@ -670,7 +683,7 @@ const I18N = {
     tool_hole: '圆孔',
     tool_select: '选择', tool_eraser: '橡皮擦', tool_draw: '画图形（即将）',
     zoom_fit: '适应',
-    snap: '磁性', hole_pos_none: '未选中孔',
+    snap: '磁性', hole_pos_none: '未选中孔', canvas_hint: '滚轮缩放 · 拖拽平移',
     card_holes: '孔', new_hole_outer: '新挂耳外径', hole_invalid: '⚠ 无法打印——请在底板上选位置',
     adv_ring: '挂耳外半径', adv_ring_hint: '圆环外缘；留空=不加挂耳',
     ring_outer: '外圆', ring_clear: '清除圆环',
@@ -890,7 +903,6 @@ function applySource(file, name) {
   $('#holeCard').hidden = true;
   $('#maskEmpty').hidden = false;
   $('#originalImg').src = sourceUrl;
-  $('#originalPanel').hidden = false;
   renderHoleList();
   updateHoleMessage();
   $('#stageMeta').textContent = name;
@@ -1012,15 +1024,15 @@ function init() {
   $('#zoomIn').addEventListener('click', () => zoomBy(1.2));
   $('#zoomOut').addEventListener('click', () => zoomBy(1 / 1.2));
   $('#zoomFit').addEventListener('click', fitCanvas);
-  $('#originalToggle').addEventListener('click', () => {
-    const panel = $('#originalPanel');
-    panel.hidden = !panel.hidden;
-    $('#originalToggle').classList.toggle('is-active', !panel.hidden);
-  });
   $('#snapToggle').addEventListener('click', () => {
     snapEnabled = !snapEnabled;
     $('#snapToggle').classList.toggle('is-active', snapEnabled);
     $('#snapToggle').setAttribute('aria-pressed', String(snapEnabled));
+  });
+  $('#newHoleOuter').addEventListener('input', () => {
+    if (!analysis) return;
+    const sel = holes.find(h => h.id === selectedHoleId);
+    if (sel) { snapshotHoles(); sel.outer = $('#newHoleOuter').value === '' ? null : num($('#newHoleOuter')); recompute(); }
   });
   $('#holeClear').addEventListener('click', clearHoles);
   window.addEventListener('keydown', (e) => {
