@@ -35,7 +35,7 @@ app = FastAPI(title="Fan Object Generator")
 # Preview colours: these are the two "filaments" shown in the UI (the light base
 # plate and the raised dark layer). The real print colour is chosen in the slicer.
 BASE_RGB = (255, 255, 255)   # white -> base plate
-COLOR_RGB = (26, 86, 196)    # blue -> raised dark layer
+COLOR_RGB = (37, 99, 235)    # blue -> raised dark layer
 
 # Example images offered as one-click sources. Mapped id -> (label, path).
 EXAMPLES = {
