@@ -69,7 +69,7 @@ Boolean operations use `engine="manifold"` throughout `model_builder.py` (union 
 
 ## Web frontend
 
-`server.py` (FastAPI + uvicorn) exposes the pipeline over HTTP and serves the static UI. It reuses the pipeline modules unchanged — it is a transport layer only, so migrating to a hosted backend means swapping `server.py`, not touching the conversion code.
+`server.py` (FastAPI + uvicorn) exposes the pipeline over HTTP and serves the static UI. It reuses the pipeline modules unchanged — it is a transport layer only, so migrating to a hosted backend means swapping `server.py`, not touching the conversion code. The app is containerised (`Dockerfile`) and host-agnostic: it runs on Render's free tier (`render.yaml`) or a VPS (`docker-compose.yml`) with no code change. `server.py` binds `FOG_HOST` (default `127.0.0.1`; the Dockerfile sets `0.0.0.0`) and reads `PORT`/`FOG_PORT`, and the service is stateless (no DB; STL goes to a temp dir).
 
 - **`server.py`** — two JSON/binary endpoints:
   - `POST /api/analyze` (multipart `file` + `dark_threshold`/`alpha_threshold` + optional `width`/`hole`/`base_color`/`color_color` hex, defaults `50`/`4`/`#ffffff`/`#2563eb`) → `{ ok, w_px, h_px, base_png, color_png, combined_png, dark_ratio, clearance_disabled, default_hole, base_poly }`. The `base_png` is the **filled** base plate (mirrors `vectorize.base_polygons`, not the raw stroke mask); `color_png` is the dark art; `combined_png` overlays them; `default_hole` is the auto-placed keyhole centre in mm (`[x, y]` or `null`) the frontend draws on the canvas; `base_poly` is the base-exterior rings (pixel space) the frontend uses to judge whether a placed ring is printable. `clearance_disabled` = `dark_ratio >= 0.85` (matches `model_builder`'s color-clearance cutoff).

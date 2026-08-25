@@ -1,0 +1,9 @@
+# Build context exclusions — keep the image lean.
+.venv
+.git
+output
+__pycache__
+*.pyc
+.claude
+.DS_Store
+SESSION_LOG.md

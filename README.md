@@ -64,7 +64,31 @@ python3 -m venv .venv
 只负责把请求转发到现有的 `image_processing → vectorize → model_builder` 管道，管道本身不改。
 以后迁移到网页托管时，把 `server.py` 换成线上服务即可，管道与前端无需改动。
 
-## 致谢 / Acknowledgments
+## 部署 / Deploy
+
+整个应用已容器化（`Dockerfile`），同一份镜像既可跑在免费 PaaS 上，也可原样跑在自己的
+VPS/Docker 上——两种托管之间**不需要改代码**。服务是无状态的（不用数据库，STL 写入临时目录）。
+
+**先上免费 PaaS（Render，免费档）**：
+1. 把仓库推到 GitHub 或 GitLab。
+2. 到 [Render](https://render.com) → New → Blueprint，选择该仓库（会自动读取 `render.yaml`）。
+3. 部署完成后即得一个公开 URL。
+
+> Render 免费档空闲约 15 分钟会「睡眠」，下一次访问需冷启动几十秒到 ~1 分钟；免费档内存
+> 较小（512MB），适合低流量，公开大流量建议尽早转 VPS。
+
+**再迁到自托管 VPS / Docker（之后想做再弄）**：
+
+```bash
+docker build -t fan-object-generator .
+docker run -d --name fog -p 8000:8000 --restart unless-stopped fan-object-generator
+```
+
+或直接用 `docker-compose up -d`。要加 HTTPS，就在前面挂一个 Caddy/Nginx 反向代理。
+容器默认绑定 `FOG_HOST=0.0.0.0` 并读 `PORT` 环境变量（Render 会自动注入）；本地开发不受影响
+（默认仍只监听 `127.0.0.1`，可用 `FOG_HOST` 覆盖）。
+
+
 
 - 矢量化（`vectorize.py`）的 **potrace 贝塞尔曲线**方案，参考了
   [bekuto3d](https://github.com/LittleSound/bekuto3d)（MIT，© 2025-PRESENT Rizumu）。

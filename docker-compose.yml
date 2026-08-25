@@ -1,0 +1,13 @@
+# Docker Compose for the "①" self-hosted step (any VPS / Docker host).
+# Uses the same image as Render — no code changes between the two.
+# Put a reverse proxy (Caddy/Nginx) in front to add HTTPS.
+services:
+  fan-object-generator:
+    build: .
+    image: fan-object-generator:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - FOG_HOST=0.0.0.0
+    restart: unless-stopped

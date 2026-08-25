@@ -287,6 +287,7 @@ def index():
 
 
 if __name__ == "__main__":
+    host = os.environ.get("FOG_HOST", "127.0.0.1")  # container/cloud sets 0.0.0.0
     port = int(os.environ.get("PORT", os.environ.get("FOG_PORT", "8000")))
-    print(f"Fan Object Generator → http://127.0.0.1:{port}")
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    print(f"Fan Object Generator → http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)
