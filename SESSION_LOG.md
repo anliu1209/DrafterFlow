@@ -1,6 +1,6 @@
 # Session Log — editor overhaul & the staircase fix
 
-A record of the work done in the session that reworked the SketchForge UI and, most
+A record of the work done in the session that reworked the DrafterFlow UI and, most
 importantly, resolved the **pixel staircase** on the curved relief edges.
 
 ---

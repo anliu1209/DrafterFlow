@@ -2,12 +2,12 @@
 # Uses the same image as Render — no code changes between the two.
 # Put a reverse proxy (Caddy/Nginx) in front to add HTTPS.
 services:
-  fan-object-generator:
+  drafterflow:
     build: .
-    image: fan-object-generator:latest
+    image: drafterflow:latest
     ports:
       - "8000:8000"
     environment:
       - PORT=8000
-      - FOG_HOST=0.0.0.0
+      - DF_HOST=0.0.0.0
     restart: unless-stopped

@@ -1,4 +1,4 @@
-# fan-object-generator
+# DrafterFlow
 
 透明背景 PNG → 多层 3D 打印钥匙扣 STL 生成器。
 
@@ -80,13 +80,13 @@ VPS/Docker 上——两种托管之间**不需要改代码**。服务是无状�
 **再迁到自托管 VPS / Docker（之后想做再弄）**：
 
 ```bash
-docker build -t fan-object-generator .
-docker run -d --name fog -p 8000:8000 --restart unless-stopped fan-object-generator
+docker build -t drafterflow .
+docker run -d --name drafterflow -p 8000:8000 --restart unless-stopped drafterflow
 ```
 
 或直接用 `docker-compose up -d`。要加 HTTPS，就在前面挂一个 Caddy/Nginx 反向代理。
-容器默认绑定 `FOG_HOST=0.0.0.0` 并读 `PORT` 环境变量（Render 会自动注入）；本地开发不受影响
-（默认仍只监听 `127.0.0.1`，可用 `FOG_HOST` 覆盖）。
+容器默认绑定 `DF_HOST=0.0.0.0` 并读 `PORT` 环境变量（Render 会自动注入）；本地开发不受影响
+（默认仍只监听 `127.0.0.1`，可用 `DF_HOST` 覆盖）。
 
 
 

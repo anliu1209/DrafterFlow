@@ -1,4 +1,4 @@
-# Fan Object Generator — container image.
+# DrafterFlow — container image.
 # Host-agnostic: runs as-is on Render (free), a VPS, or any Docker host.
 FROM python:3.13-slim
 
@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Bind all interfaces so Render / a reverse proxy can reach the app. Local dev can
-# override with FOG_HOST=127.0.0.1. Render sets PORT itself; this is just a default.
-ENV FOG_HOST=0.0.0.0
+# override with DF_HOST=127.0.0.1. Render sets PORT itself; this is just a default.
+ENV DF_HOST=0.0.0.0
 ENV PORT=8000
 EXPOSE 8000
 

@@ -1,4 +1,4 @@
-"""Localhost web frontend for the fan-object (keychain) generator.
+"""Localhost web frontend for the DrafterFlow keychain generator.
 
 Runs the existing pipeline (image_processing -> vectorize -> model_builder) behind
 a small HTTP API and serves a static browser UI. The pipeline modules are reused
@@ -30,7 +30,7 @@ from vectorize import base_polygons, color_polygons
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Fan Object Generator")
+app = FastAPI(title="DrafterFlow")
 
 # Preview colours: these are the two "filaments" shown in the UI (the light base
 # plate and the raised dark layer). The real print colour is chosen in the slicer.
@@ -156,7 +156,7 @@ async def analyze(
     base_rgb = _hex_rgb(base_color, BASE_RGB)
     color_rgb = _hex_rgb(color_color, COLOR_RGB)
 
-    tmpdir = tempfile.mkdtemp(prefix="fog_")
+    tmpdir = tempfile.mkdtemp(prefix="df_")
     try:
         path = _save_upload(data, tmpdir)
         try:
@@ -238,7 +238,7 @@ async def generate(
         except Exception:
             holes_list = None
 
-    tmpdir = tempfile.mkdtemp(prefix="fog_")
+    tmpdir = tempfile.mkdtemp(prefix="df_")
     try:
         path = _save_upload(data, tmpdir)
         try:
@@ -287,7 +287,7 @@ def index():
 
 
 if __name__ == "__main__":
-    host = os.environ.get("FOG_HOST", "127.0.0.1")  # container/cloud sets 0.0.0.0
-    port = int(os.environ.get("PORT", os.environ.get("FOG_PORT", "8000")))
-    print(f"Fan Object Generator → http://{host}:{port}")
+    host = os.environ.get("DF_HOST", "127.0.0.1")  # container/cloud sets 0.0.0.0
+    port = int(os.environ.get("PORT", os.environ.get("DF_PORT", "8000")))
+    print(f"DrafterFlow → http://{host}:{port}")
     uvicorn.run(app, host=host, port=port)

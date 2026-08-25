@@ -1,9 +1,9 @@
 # Render blueprint — free Docker web service (this is the "②" step).
-# Render injects PORT and routes to the container; the Dockerfile sets FOG_HOST=0.0.0.0.
+# Render injects PORT and routes to the container; the Dockerfile sets DF_HOST=0.0.0.0.
 # The same image later runs unchanged on a VPS (docker-compose.yml) for the "①" step.
 services:
   - type: web
-    name: fan-object-generator
+    name: drafterflow
     runtime: docker
     plan: free
     healthCheckPath: /

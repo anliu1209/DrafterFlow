@@ -616,7 +616,7 @@ function fmtSize(bytes) {
 }
 
 // ---------- theme ----------
-const THEME_KEY = 'sketchforge_theme';
+const THEME_KEY = 'drafterflow_theme';
 function initTheme() {
   const root = document.documentElement;
   root.dataset.theme = localStorage.getItem(THEME_KEY) || 'light';
@@ -637,7 +637,7 @@ const I18N = {
     cta_create: 'Create a 3D model', cta_how: 'How it works',
     hero_eyebrow: '2D drawing → 3D relief → physical object',
     hero_title: 'Turn your drawings into physical objects.',
-    hero_sub: 'SketchForge transforms 2D drawings into manufacturable 3D models — no 3D modeling experience required.',
+    hero_sub: 'DrafterFlow transforms 2D drawings into manufacturable 3D models — no 3D modeling experience required.',
     hv_drawing: 'Your drawing', hv_layers: 'Detected layers', hv_printable: 'Printable relief',
     hv_base: '4 mm base', hv_relief: '2 mm relief', hv_note: 'One STL, one filament swap.',
     forge_title: 'Create your model', forge_sub: 'Upload a drawing with a transparent background and dark line work.', forge_note: 'No 3D modeling experience required.',
@@ -676,7 +676,7 @@ const I18N = {
     use3_t: 'Tactile', use3_b: 'Explore turning visual artwork into raised, touchable forms.',
     use4_t: 'Prototyping', use4_b: 'Turn simple sketches into quick physical prototypes.',
     use5_t: 'Fan art', use5_b: 'Turn your favorite designs into physical keepsakes.',
-    gallery_eyebrow: 'Examples', gallery_title: 'Made with SketchForge', gallery_sub: 'A few outputs from the pipeline. Load one into the tool and see how it was built.',
+    gallery_eyebrow: 'Examples', gallery_title: 'Made with DrafterFlow', gallery_sub: 'A few outputs from the pipeline. Load one into the tool and see how it was built.',
     gal1_name: 'Frame & text', gal1_type: 'line art · relief on base',
     gal2_name: 'Heart', gal2_type: 'solid silhouette',
     gal3_name: 'Line art', gal3_type: 'dense contours',
@@ -702,7 +702,7 @@ const I18N = {
     cta_create: '创建 3D 模型', cta_how: '工作原理',
     hero_eyebrow: '2D 线稿 → 3D 浮雕 → 实体物件',
     hero_title: '把你的画变成实体物件。',
-    hero_sub: 'SketchForge 把 2D 线稿变成可制造的 3D 模型——无需任何三维建模经验。',
+    hero_sub: 'DrafterFlow 把 2D 线稿变成可制造的 3D 模型——无需任何三维建模经验。',
     hv_drawing: '你的画', hv_layers: '识别出的分层', hv_printable: '可打印的浮雕',
     hv_base: '4 mm 底板', hv_relief: '2 mm 浮雕', hv_note: '一个 STL，一次换料。',
     forge_title: '创建你的模型', forge_sub: '上传一张透明背景、深色线稿的图片。', forge_note: '无需三维建模经验。',
@@ -741,7 +741,7 @@ const I18N = {
     use3_t: '触感', use3_b: '把视觉作品变成凸起的、可触摸的形态。',
     use4_t: '原型', use4_b: '把简单草图变成快速实体原型。',
     use5_t: '同人周边', use5_b: '把你喜欢的设计变成实体收藏。',
-    gallery_eyebrow: '示例', gallery_title: '用 SketchForge 做的', gallery_sub: '流水线的一些输出。载入一个到工具里看看它是怎么生成的。',
+    gallery_eyebrow: '示例', gallery_title: '用 DrafterFlow 做的', gallery_sub: '流水线的一些输出。载入一个到工具里看看它是怎么生成的。',
     gal1_name: '边框与文字', gal1_type: '线稿 · 底板上的浮雕',
     gal2_name: '爱心', gal2_type: '实心轮廓',
     gal3_name: '线稿', gal3_type: '密集轮廓',
@@ -763,7 +763,7 @@ const I18N = {
     gauge_base: '底板', gauge_relief: '浮雕', gauge_swap: '换料 @ ', gauge_total: '总高',
   },
 };
-let LANG = localStorage.getItem('sketchforge_lang') || 'en';
+let LANG = localStorage.getItem('drafterflow_lang') || 'en';
 function t(key) {
   return (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
 }
@@ -780,7 +780,7 @@ function initLanguage() {
   if (toggle) {
     toggle.addEventListener('click', () => {
       LANG = LANG === 'en' ? 'zh' : 'en';
-      localStorage.setItem('sketchforge_lang', LANG);
+      localStorage.setItem('drafterflow_lang', LANG);
       applyLanguage();
       syncOrigThumb();
       if (sourceFile) analyze();

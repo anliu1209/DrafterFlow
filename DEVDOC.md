@@ -103,7 +103,7 @@ SVG → 2D geometry → extrude → boolean → STL / 3MF
 ## 5. 项目结构
 
 ```
-fan-object-generator/
+drafterflow/
 │
 ├── main.py
 ├── image_processing.py
