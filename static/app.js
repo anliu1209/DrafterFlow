@@ -782,6 +782,7 @@ function initLanguage() {
       LANG = LANG === 'en' ? 'zh' : 'en';
       localStorage.setItem('sketchforge_lang', LANG);
       applyLanguage();
+      syncOrigThumb();
       if (sourceFile) analyze();
     });
   }
@@ -942,6 +943,17 @@ async function generateThenSwitch() {
   commitSwitch();
 }
 
+function syncOrigThumb() {
+  // Size the original-image square to the width of the Base/Relief layer panel so the
+  // preview lines up with the two layer rows beside it. No-op until a source is loaded.
+  const thumb = $('#origThumb');
+  const panel = document.querySelector('.layer-panel');
+  if (!thumb || thumb.hidden || !panel) return;
+  const w = Math.max(96, Math.round(panel.getBoundingClientRect().width));
+  thumb.style.width = w + 'px';
+  thumb.style.height = w + 'px';
+}
+
 function applySource(file, name) {
   if (sourceUrl) URL.revokeObjectURL(sourceUrl);
   sourceFile = file;
@@ -957,6 +969,7 @@ function applySource(file, name) {
   $('#maskEmpty').hidden = false;
   $('#originalImg').src = sourceUrl;
   $('#origThumb').hidden = false;
+  syncOrigThumb();
   renderHoleList();
   updateHoleMessage();
   $('#stageMeta').textContent = name;
@@ -1096,7 +1109,7 @@ function init() {
     if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoHoles(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && activeTool === 'select' && tg !== 'INPUT') deleteSelectedHole();
   });
-  window.addEventListener('resize', () => { if (analysis) fitCanvas(); });
+  window.addEventListener('resize', () => { syncOrigThumb(); if (analysis) fitCanvas(); });
 
   // params -> gauge
   bindPair('#width', '#widthRange', () => { renderGauge(); if (analysis) renderCanvas(); });
