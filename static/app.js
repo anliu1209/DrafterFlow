@@ -1071,6 +1071,35 @@ function setupDropzone() {
   });
 }
 
+function initMotion() {
+  document.documentElement.classList.add('js');
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // If IntersectionObserver is unavailable, fall back to showing everything.
+  let io = null;
+  try {
+    io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    }, { threshold: 0.12, rootMargin: '0px 0px -50px 0px' });
+  } catch (_) { io = null; }
+  const stag = (els, step) => els.forEach((el, i) => el.style.setProperty('--reveal-delay', (i * step) + 'ms'));
+
+  // Hero: staggered fade-up on load (entrance).
+  const hero = document.querySelectorAll('.hero .eyebrow, .hero .hero-title, .hero .hero-sub, .hero .hero-cta');
+  hero.forEach(el => el.classList.add('reveal', 'reveal--hero'));
+  stag(hero, 60);
+  requestAnimationFrame(() => requestAnimationFrame(() => hero.forEach(el => el.classList.add('in'))));
+  // Guarantee the hero always reveals, even if rAF is throttled/paused.
+  setTimeout(() => hero.forEach(el => el.classList.add('in')), 300);
+
+  // Sections + cards: reveal as they scroll in (scroll-reveal), staggered per group.
+  const groups = ['.hero .hv-card', '.section-head', '.pipe-step', '.use-card', '.gallery-item', '.about-copy p', '.about-tagline'];
+  for (const sel of groups) {
+    const els = document.querySelectorAll(sel);
+    stag(els, 70);
+    els.forEach(el => { el.classList.add('reveal'); if (io) io.observe(el); else el.classList.add('in'); });
+  }
+}
+
 function init() {
   initThree();
   setupDropzone();
@@ -1079,6 +1108,7 @@ function init() {
   initGallery();
   initTheme();
   initLanguage();
+  initMotion();
 
   // layers (PS-style, preview-only) + editor canvas + tools + original + holes
   $('#layerBaseEye').addEventListener('click', onLayerToggle);

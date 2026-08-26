@@ -704,3 +704,29 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   * { transition: none !important; animation: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ---------------- motion (motion-anything) ----------------
+   entrance + scroll-reveal + hover-press, spec-aligned tokens. */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur-base: 260ms;
+  --dur-slow: 420ms;
+}
+.js .reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.js .reveal--hero { transform: translateY(22px); }
+.js .reveal.in { opacity: 1; transform: none; }
+
+.hv-card, .use-card, .gallery-item {
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.hv-card:hover, .use-card:hover, .gallery-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 16px rgba(20, 20, 30, 0.08), 0 14px 32px rgba(20, 20, 30, 0.10);
+}
+
