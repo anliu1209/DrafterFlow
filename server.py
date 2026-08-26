@@ -35,7 +35,7 @@ app = FastAPI(title="DrafterFlow")
 # Preview colours: these are the two "filaments" shown in the UI (the light base
 # plate and the raised dark layer). The real print colour is chosen in the slicer.
 BASE_RGB = (255, 255, 255)   # white -> base plate
-COLOR_RGB = (37, 99, 235)    # blue -> raised dark layer
+COLOR_RGB = (43, 74, 124)    # ink-blue -> raised dark layer
 
 # Example images offered as one-click sources. Mapped id -> (label, path).
 EXAMPLES = {
@@ -142,7 +142,7 @@ async def analyze(
     width: str = Form("50"),
     hole: str = Form("4"),
     base_color: str = Form("#ffffff"),
-    color_color: str = Form("#2563eb"),
+    color_color: str = Form("#2b4a7c"),
 ):
     """Return the base/colour masks as PNGs so the user can see what will be built."""
     data = await file.read()

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DrafterFlow — Turn your drawings into physical objects</title>
-<meta name="description" content="DrafterFlow turns 2D drawings and line art into manufacturable 3D relief models you can 3D print — no CAD experience required.">
+<title>DrafterFlow · Turn your drawings into physical objects</title>
+<meta name="description" content="DrafterFlow turns 2D drawings and line art into manufacturable 3D relief models you can 3D print without CAD experience.">
 <link rel="stylesheet" href="/static/style.css">
 <script type="importmap">
 { "imports": { "three": "/static/vendor/three.module.js", "three/addons/": "/static/vendor/" } }
@@ -40,9 +40,9 @@
 
   <!-- ============ HERO ============ -->
   <section class="hero" id="top">
-    <p class="eyebrow" data-i18n="hero_eyebrow">2D drawing &rarr; 3D relief &rarr; physical object</p>
+    <p class="eyebrow" data-i18n="hero_eyebrow">A drawing, made physical.</p>
     <h1 class="hero-title" data-i18n="hero_title">Turn your drawings into physical objects.</h1>
-    <p class="hero-sub" data-i18n="hero_sub">DrafterFlow transforms 2D drawings into manufacturable 3D models &mdash; no CAD experience required.</p>
+    <p class="hero-sub" data-i18n="hero_sub">DrafterFlow turns 2D drawings into 3D-printable objects. No CAD experience required.</p>
     <div class="hero-cta">
       <a class="btn btn-primary btn-lg" href="#forge" data-i18n="cta_create">Create a 3D model</a>
       <a class="btn btn-ghost btn-lg" href="#how" data-i18n="cta_how">How it works</a>
@@ -53,12 +53,10 @@
         <span class="hv-label" data-i18n="hv_drawing">Your drawing</span>
         <div class="hv-frame checker"><img id="heroOriginal" alt="Example drawing" draggable="false"></div>
       </div>
-      <div class="hv-arrow" aria-hidden="true">&rarr;</div>
       <div class="hv-card">
         <span class="hv-label" data-i18n="hv_layers">Detected layers</span>
         <div class="hv-frame checker"><img id="heroLayers" alt="Detected base and relief layers" draggable="false"></div>
       </div>
-      <div class="hv-arrow" aria-hidden="true">&rarr;</div>
       <div class="hv-card hv-card--solid">
         <span class="hv-label" data-i18n="hv_printable">Printable relief</span>
         <div class="hv-chip">
@@ -89,7 +87,7 @@
     <div class="forge-grid">
       <aside class="rail">
         <section class="card">
-          <h3 class="card-title"><span data-i18n="card_drawing">Drawing</span> <span class="card-num">01</span></h3>
+          <h3 class="card-title"><span data-i18n="card_drawing">Drawing</span></h3>
           <div class="dropzone" id="dropzone" role="button" tabindex="0">
             <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg" hidden>
             <div class="dz-inner">
@@ -107,7 +105,7 @@
         </section>
 
         <section class="card">
-          <h3 class="card-title"><span data-i18n="card_dims">Dimensions</span> <span class="card-num">02</span></h3>
+          <h3 class="card-title"><span data-i18n="card_dims">Dimensions</span></h3>
 
           <div class="field">
             <label class="field-label" for="width">
@@ -153,28 +151,28 @@
         </section>
 
         <section class="card" id="holeCard" hidden>
-          <h3 class="card-title"><span data-i18n="card_holes">Holes</span> <span class="card-num">05</span></h3>
+          <h3 class="card-title"><span data-i18n="card_holes">Holes</span></h3>
           <div class="hole-list" id="holeList"></div>
           <button class="ring-clear" id="holeClear" type="button" data-i18n="ring_clear">Clear all</button>
         </section>
 
         <section class="card">
-          <h3 class="card-title"><span data-i18n="card_colors">Colors</span> <span class="card-num">03</span></h3>
+          <h3 class="card-title"><span data-i18n="card_colors">Colors</span></h3>
           <div class="color-row">
             <label class="color-field">
               <input type="color" id="baseColor" value="#ffffff">
               <span data-i18n="color_base">Base</span>
             </label>
             <label class="color-field">
-              <input type="color" id="colorColor" value="#2563eb">
+              <input type="color" id="colorColor" value="#2b4a7c">
               <span data-i18n="color_relief">Relief</span>
             </label>
           </div>
-          <p class="color-note" data-i18n="color_note">Preview colors &mdash; the real print color comes from your filament.</p>
+          <p class="color-note" data-i18n="color_note">Preview colors ,  the real print color comes from your filament.</p>
         </section>
 
         <section class="card">
-          <h3 class="card-title"><span data-i18n="card_section">Cross-section</span> <span class="card-num">04</span></h3>
+          <h3 class="card-title"><span data-i18n="card_section">Cross-section</span></h3>
           <div class="gauge" id="gauge"></div>
           <div class="gauge-readout" id="gaugeReadout"></div>
         </section>
@@ -279,16 +277,16 @@
     <div class="section-head">
       <p class="eyebrow" data-i18n="how_eyebrow">Under the hood</p>
       <h2 class="section-title" data-i18n="how_title">How it works</h2>
-      <p class="section-sub" data-i18n="how_sub">A drawing goes through a real geometry pipeline &mdash; computer vision to manufacturable mesh.</p>
+      <p class="section-sub" data-i18n="how_sub">A drawing goes through a real geometry pipeline: computer vision to a printable mesh.</p>
     </div>
     <ol class="pipeline">
-      <li class="pipe-step"><span class="pipe-num">01</span><div><h4 data-i18n="how1_t">Input image</h4><p data-i18n="how1_b">A transparent-background PNG with dark line work.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">02</span><div><h4 data-i18n="how2_t">Silhouette detection</h4><p data-i18n="how2_b">OpenCV separates the artwork from the background by alpha.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">03</span><div><h4 data-i18n="how3_t">Contour tracing</h4><p data-i18n="how3_b">Dark regions are traced into closed polygons.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">04</span><div><h4 data-i18n="how4_t">Geometry smoothing</h4><p data-i18n="how4_b">Corner-cutting removes the pixel staircase from curves.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">05</span><div><h4 data-i18n="how5_t">Relief generation</h4><p data-i18n="how5_b">Regions are extruded into a base plate plus a raised relief layer.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">06</span><div><h4 data-i18n="how6_t">Printability check</h4><p data-i18n="how6_b">A keychain hole is placed clear of the artwork with a safe margin.</p></div></li>
-      <li class="pipe-step"><span class="pipe-num">07</span><div><h4 data-i18n="how7_t">STL export</h4><p data-i18n="how7_b">One two-layer STL &mdash; print with a single filament swap at the base height.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how1_t">Input image</h4><p data-i18n="how1_b">A transparent-background PNG with dark line work.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how2_t">Silhouette detection</h4><p data-i18n="how2_b">OpenCV separates the artwork from the background by alpha.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how3_t">Contour tracing</h4><p data-i18n="how3_b">Dark regions are traced into closed polygons.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how4_t">Geometry smoothing</h4><p data-i18n="how4_b">Corner-cutting removes the pixel staircase from curves.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how5_t">Relief generation</h4><p data-i18n="how5_b">Regions are extruded into a base plate plus a raised relief layer.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how6_t">Printability check</h4><p data-i18n="how6_b">A keychain hole is placed clear of the artwork with a safe margin.</p></div></li>
+      <li class="pipe-step"><div><h4 data-i18n="how7_t">STL export</h4><p data-i18n="how7_b">One two-layer STL ,  print with a single filament swap at the base height.</p></div></li>
     </ol>
   </section>
 
@@ -318,7 +316,7 @@
       <figure class="gallery-item">
         <div class="gallery-frame checker"><img src="/api/examples/nametag" alt="Nametag" draggable="false"></div>
         <figcaption><span data-i18n="gal1_name">Frame &amp; text</span> <span class="gallery-type" data-i18n="gal1_type">line art · relief on base</span></figcaption>
-        <button class="btn btn-ghost btn-sm" data-example="nametag" data-i18n="gallery_try">Try it &rarr;</button>
+        <button class="btn btn-ghost btn-sm" data-example="nametag" data-i18n="gallery_try">Try it</button>
       </figure>
       <figure class="gallery-item">
         <div class="gallery-frame checker"><img src="/api/examples/heart" alt="Heart" draggable="false"></div>
@@ -332,7 +330,7 @@
       </figure>
       <figure class="gallery-item gallery-item--placeholder">
         <div class="gallery-frame gallery-frame--empty" data-i18n="gallery_ph">Your drawing here</div>
-        <figcaption data-i18n="gallery_ph_cap">Community submissions &mdash; coming soon</figcaption>
+        <figcaption data-i18n="gallery_ph_cap">Community submissions ,  coming soon</figcaption>
         <button class="btn btn-ghost btn-sm" data-example="nametag" data-i18n="gallery_ph_btn">Start with an example</button>
       </figure>
     </div>
@@ -345,11 +343,11 @@
       <h2 class="section-title" data-i18n="about_title">About</h2>
     </div>
     <div class="about-copy">
-      <p data-i18n="about_1">DrafterFlow started with a simple problem: I wanted to turn a drawing into a 3D-printed object, but creating a printable 3D model required CAD skills.</p>
-      <p data-i18n="about_2">So I built a tool to bridge the gap between a drawing and fabrication &mdash; something that reads an image the way a person sees it, and turns it into geometry a printer can make.</p>
-      <p data-i18n="about_3">What started as a way to make fan art became a broader experiment in making digital fabrication more accessible.</p>
+      <p data-i18n="about_1">This started with a drawing: I sketched a chibi of Heeseung and wanted it as a real 3D-printed keychain.</p>
+      <p data-i18n="about_2">Tracing the line art by hand in Onshape took hours and didn't scale to more pieces, so I automated it. DrafterFlow reads an image the way a person would and turns it into geometry a printer can make.</p>
+      <p data-i18n="about_3">What began as one piece of fan art grew into a tool for turning drawings into physical things.</p>
     </div>
-    <p class="about-tagline" data-i18n="about_tagline">Creativity &rarr; Computation &rarr; Fabrication.</p>
+    <p class="about-tagline" data-i18n="about_tagline">Draw it. Upload it. Print it.</p>
   </section>
 
 </main>
