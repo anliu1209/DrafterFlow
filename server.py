@@ -10,6 +10,7 @@ Run with:  .venv/bin/python server.py   (then open http://127.0.0.1:8000)
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -30,6 +31,9 @@ from model_builder import ModelBuildError, build_color_layer_model, build_model,
 from vectorize import base_polygons, color_polygons
 
 BASE_DIR = Path(__file__).resolve().parent
+ASSET_REVISION = hashlib.sha256(
+    (BASE_DIR / 'static' / 'app.js').read_bytes() + (BASE_DIR / 'static' / 'style.css').read_bytes()
+).hexdigest()[:12]
 
 app = FastAPI(title="DrafterFlow")
 
@@ -491,7 +495,10 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 @app.get("/")
 def index():
-    return FileResponse(BASE_DIR / "static" / "index.html")
+    html = (BASE_DIR / 'static' / 'index.html').read_text()
+    for asset in ('app.js', 'style.css'):
+        html = html.replace(f'/static/{asset}"', f'/static/{asset}?v={ASSET_REVISION}"')
+    return Response(html, media_type='text/html', headers={'Cache-Control': 'no-cache'})
 
 
 if __name__ == "__main__":
