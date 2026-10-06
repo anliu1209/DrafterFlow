@@ -1,11 +1,18 @@
 """Ensure the Color Mode release does not expose local-only account features."""
 import unittest
 import inspect
+from pathlib import Path
 
 from server import app, index, ASSET_REVISION
 
 
 class ReleaseScopeTests(unittest.TestCase):
+    def test_preview_dependencies_are_bundled_with_static_assets(self):
+        static = Path(__file__).resolve().parents[1] / 'static'
+        for filename in ('three.module.js', 'STLLoader.js', 'OrbitControls.js', 'BufferGeometryUtils.js'):
+            self.assertGreater((static / filename).stat().st_size, 1000)
+        self.assertIn('"three": "/static/three.module.js"', index().body.decode())
+
     def test_colour_pipelines_run_off_the_event_loop(self):
         for route in app.routes:
             if route.path in ('/api/color/analyze', '/api/color/generate'):
