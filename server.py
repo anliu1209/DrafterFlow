@@ -516,8 +516,8 @@ def generate_color_layers(
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-    # Static frontend (served last so the /api routes above win).
-    app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+# Static frontend (served last so the /api routes above win).
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 @app.get("/")

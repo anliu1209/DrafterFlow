@@ -77,6 +77,13 @@ STL 仅包含几何，需在切片器中按打印计划设置换料。草稿仅�
 
 测试：`python -m unittest discover -s tests -v`。
 
+发布用的 `static/app.js` 已将 Three.js 和预览依赖合并，无需线上请求 vendor 目录。
+编辑 `src/editor.js` 后重新打包（运行服务无需 Node）：
+
+```bash
+pnpm dlx esbuild@0.25.10 src/editor.js --bundle --format=esm --alias:three=./static/vendor/three.module.js --alias:three/addons=./static/vendor --outfile=static/app.js --minify
+```
+
 ## 部署 / Deploy
 
 整个应用已容器化（`Dockerfile`），同一份镜像既可跑在免费 PaaS 上，也可原样跑在自己的

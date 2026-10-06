@@ -1,0 +1,2 @@
+# Bundled Three.js contains GLSL string literals with intentional trailing spaces.
+static/app.js whitespace=-blank-at-eol
