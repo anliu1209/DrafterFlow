@@ -10,6 +10,9 @@ Run with:  .venv/bin/python server.py   (then open http://127.0.0.1:8000)
 from __future__ import annotations
 
 import base64
+import ctypes
+import gc
+import threading
 import hashlib
 import json
 import os
@@ -40,6 +43,19 @@ app = FastAPI(title="DrafterFlow")
 # Bound OpenCV's worker scratch space on the small production instance.
 # This changes execution scheduling, not pixel assignment or geometry.
 cv2.setNumThreads(1)
+COLOR_PROCESSING_LOCK = threading.Lock()
+
+def _release_color_scratch_memory():
+    """Return unused analysis/vectorizer arenas before constructing the mesh."""
+    gc.collect()
+    try:
+        trim = ctypes.CDLL(None).malloc_trim
+        trim.argtypes = [ctypes.c_size_t]
+        trim.restype = ctypes.c_int
+        trim(0)
+    except AttributeError:
+        pass  # malloc_trim is available on the production Linux host, not macOS.
+
 
 # Preview colours: these are the two "filaments" shown in the UI (the light base
 # plate and the raised dark layer). The real print colour is chosen in the slicer.
@@ -258,7 +274,7 @@ async def analyze(
 
 
 @app.post("/api/color/analyze")
-async def analyze_color_layers(
+def analyze_color_layers(
     file: UploadFile = File(...),
     palette_size: str = Form("5"),
     alpha_threshold: str = Form("8"),
@@ -268,31 +284,34 @@ async def analyze_color_layers(
     palette: str | None = Form(None),
 ):
     """Quantize a flat illustration and return one inspectable mask per colour."""
-    data = await file.read()
-    if not data:
-        raise HTTPException(400, "Uploaded file is empty.")
-    count = _int(palette_size, 5, "palette size")
-    alpha = _int(alpha_threshold, 8, "alpha threshold")
-    cleanup = _int(cleanup_min_area, 0, "cleanup size")
-    width_mm = _num(width, 80.0, "model width")
-    tmpdir = tempfile.mkdtemp(prefix="df_color_")
-    try:
-        path = _save_upload(data, tmpdir)
+    data = file.file.read()
+    # Run in FastAPI's worker pool so health checks and assets remain responsive.
+    # Serialize memory-heavy colour requests on the small shared instance.
+    with COLOR_PROCESSING_LOCK:
+        if not data:
+            raise HTTPException(400, "Uploaded file is empty.")
+        count = _int(palette_size, 5, "palette size")
+        alpha = _int(alpha_threshold, 8, "alpha threshold")
+        cleanup = _int(cleanup_min_area, 0, "cleanup size")
+        width_mm = _num(width, 80.0, "model width")
+        tmpdir = tempfile.mkdtemp(prefix="df_color_")
         try:
-            result = analyze_color_image(
-                path,
-                palette_size=count,
-                alpha_threshold=alpha,
-                cleanup_min_area_px=cleanup,
-                width_mm=width_mm,
-                remove_background=remove_background,
-                palette=_parse_color_palette(palette) if palette else None,
-            )
-        except ColorLayerError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        return _color_layer_payload(result)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+            path = _save_upload(data, tmpdir)
+            try:
+                result = analyze_color_image(
+                    path,
+                    palette_size=count,
+                    alpha_threshold=alpha,
+                    cleanup_min_area_px=cleanup,
+                    width_mm=width_mm,
+                    remove_background=remove_background,
+                    palette=_parse_color_palette(palette) if palette else None,
+                )
+            except ColorLayerError as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+            return _color_layer_payload(result)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @app.post("/api/generate")
@@ -380,7 +399,7 @@ async def generate(
 
 
 @app.post("/api/color/generate")
-async def generate_color_layers(
+def generate_color_layers(
     file: UploadFile = File(...),
     width: str = Form("80"),
     base: str = Form("0.4"),
@@ -398,99 +417,107 @@ async def generate_color_layers(
     Optional background removal clears exterior regions before tracing, preserving
     enclosed details of the same palette colour.
     """
-    data = await file.read()
-    if not data:
-        raise HTTPException(400, "Uploaded file is empty.")
-    width_mm = _num(width, 80.0, "model width")
-    base_thickness = _num(base, 0.4, "base thickness")
-    height_increment = _num(increment, 0.2, "height increment")
-    alpha = _int(alpha_threshold, 8, "alpha threshold")
-    cleanup = _int(cleanup_min_area, 0, "cleanup size")
-    submitted_palette = _parse_color_palette(palette)
-    if any(not isinstance(item, dict) for item in submitted_palette):
-        raise HTTPException(422, "Every color layer palette entry must be an object.")
-    active_ids = {str(item.get("id")) for item in submitted_palette if not bool(item.get("ignored", False))}
-    if not active_ids:
-        raise HTTPException(422, "Enable at least one colour layer before generating.")
+    data = file.file.read()
+    # Run in FastAPI's worker pool so health checks and assets remain responsive.
+    # Serialize memory-heavy colour requests on the small shared instance.
+    with COLOR_PROCESSING_LOCK:
+        if not data:
+            raise HTTPException(400, "Uploaded file is empty.")
+        width_mm = _num(width, 80.0, "model width")
+        base_thickness = _num(base, 0.4, "base thickness")
+        height_increment = _num(increment, 0.2, "height increment")
+        alpha = _int(alpha_threshold, 8, "alpha threshold")
+        cleanup = _int(cleanup_min_area, 0, "cleanup size")
+        submitted_palette = _parse_color_palette(palette)
+        if any(not isinstance(item, dict) for item in submitted_palette):
+            raise HTTPException(422, "Every color layer palette entry must be an object.")
+        active_ids = {str(item.get("id")) for item in submitted_palette if not bool(item.get("ignored", False))}
+        if not active_ids:
+            raise HTTPException(422, "Enable at least one colour layer before generating.")
 
-    tmpdir = tempfile.mkdtemp(prefix="df_color_")
-    try:
-        path = _save_upload(data, tmpdir)
+        tmpdir = tempfile.mkdtemp(prefix="df_color_")
         try:
-            result = analyze_color_image(
-                path,
-                alpha_threshold=alpha,
-                cleanup_min_area_px=cleanup,
-                width_mm=width_mm,
-                # Keep the full palette during assignment. Passing only active
-                # colours made an ignored white background get re-labelled as a
-                # foreground colour, so "Ignore" previously changed the UI but
-                # not the printable geometry.
-                palette=submitted_palette,
-                remove_background=remove_background,
-            )
-            if layers is not None:
-                resolved = resolve_color_layers(result, _parse_color_palette(layers))
-                active_masks = [mask for _, mask in resolved]
-            else:
-                active_masks = [entry.mask for entry in result.palette if entry.id in active_ids and entry.pixel_count > 0]
-            if not active_masks:
-                raise ModelBuildError("No printable colour regions remain after cleanup.")
-            thicknesses = None
-            if layers is not None:
-                try:
-                    thicknesses = [float(entry.get('height_mm') if entry.get('height_mm') is not None else height_increment) for entry, _ in resolved]
-                except (TypeError, ValueError):
-                    raise ModelBuildError('Each colour layer height must be a valid number of millimetres.')
-            base_mask = np.logical_or.reduce(active_masks).astype(np.uint8)
-            base = base_polygons(base_mask)
-            layer_polys = [color_polygons(mask) for mask in active_masks]
-            hole = None
-            if base_hole:
-                try:
-                    hole = json.loads(base_hole)
-                    if not isinstance(hole, dict) or any(key not in hole for key in ('x', 'y', 'diameter')):
-                        raise ValueError()
-                    hole = {key: float(hole[key]) for key in ('x', 'y', 'diameter')}
-                    payload = json.loads(base_hole)
-                    if payload.get('height') is not None:
-                        hole['height'] = float(payload['height'])
-                except (TypeError, ValueError):
-                    raise ModelBuildError('The base hole position or diameter is invalid.')
-            mesh, final_heights = build_color_layer_model(
-                base,
-                layer_polys,
-                result.width_px,
-                result.height_px,
-                width_mm=width_mm,
-                base_thickness=base_thickness,
-                height_increment=height_increment,
-                base_hole=hole,
-                layer_thicknesses=thicknesses,
-            )
-        except (ColorLayerError, ModelBuildError) as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        except Exception as exc:
-            # Do not expose an internal GEOS/mesh traceback in the editor. The
-            # common topology cases are repaired in model_builder; this remains
-            # a useful actionable fallback for an unexpected malformed image.
-            return JSONResponse({"ok": False, "error": "Could not build this colour geometry. Try background removal or increase cleanup."}, status_code=400)
+            path = _save_upload(data, tmpdir)
+            try:
+                result = analyze_color_image(
+                    path,
+                    alpha_threshold=alpha,
+                    cleanup_min_area_px=cleanup,
+                    width_mm=width_mm,
+                    # Keep the full palette during assignment. Passing only active
+                    # colours made an ignored white background get re-labelled as a
+                    # foreground colour, so "Ignore" previously changed the UI but
+                    # not the printable geometry.
+                    palette=submitted_palette,
+                    remove_background=remove_background,
+                )
+                if layers is not None:
+                    resolved = resolve_color_layers(result, _parse_color_palette(layers))
+                    active_masks = [mask for _, mask in resolved]
+                else:
+                    active_masks = [entry.mask for entry in result.palette if entry.id in active_ids and entry.pixel_count > 0]
+                if not active_masks:
+                    raise ModelBuildError("No printable colour regions remain after cleanup.")
+                thicknesses = None
+                if layers is not None:
+                    try:
+                        thicknesses = [float(entry.get('height_mm') if entry.get('height_mm') is not None else height_increment) for entry, _ in resolved]
+                    except (TypeError, ValueError):
+                        raise ModelBuildError('Each colour layer height must be a valid number of millimetres.')
+                base_mask = np.logical_or.reduce(active_masks).astype(np.uint8)
+                base = base_polygons(base_mask)
+                layer_polys = [color_polygons(mask) for mask in active_masks]
+                hole = None
+                if base_hole:
+                    try:
+                        hole = json.loads(base_hole)
+                        if not isinstance(hole, dict) or any(key not in hole for key in ('x', 'y', 'diameter')):
+                            raise ValueError()
+                        hole = {key: float(hole[key]) for key in ('x', 'y', 'diameter')}
+                        payload = json.loads(base_hole)
+                        if payload.get('height') is not None:
+                            hole['height'] = float(payload['height'])
+                    except (TypeError, ValueError):
+                        raise ModelBuildError('The base hole position or diameter is invalid.')
+                image_width, image_height = result.width_px, result.height_px
+                del result, active_masks, base_mask
+                if layers is not None:
+                    del resolved
+                _release_color_scratch_memory()
+                mesh, final_heights = build_color_layer_model(
+                    base,
+                    layer_polys,
+                    image_width,
+                    image_height,
+                    width_mm=width_mm,
+                    base_thickness=base_thickness,
+                    height_increment=height_increment,
+                    base_hole=hole,
+                    layer_thicknesses=thicknesses,
+                )
+            except (ColorLayerError, ModelBuildError) as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+            except Exception as exc:
+                # Do not expose an internal GEOS/mesh traceback in the editor. The
+                # common topology cases are repaired in model_builder; this remains
+                # a useful actionable fallback for an unexpected malformed image.
+                return JSONResponse({"ok": False, "error": "Could not build this colour geometry. Try background removal or increase cleanup."}, status_code=400)
 
-        out_path = export_stl(mesh, os.path.join(tmpdir, "color-layer-relief"))
-        with open(out_path, "rb") as f:
-            stl_bytes = f.read()
-        height_text = ",".join(f"{v:.6f}" for v in final_heights)
-        headers = {
-            "Content-Disposition": 'attachment; filename="color-layer-relief.stl"',
-            "X-Color-Layer-Heights": height_text,
-        }
-        return Response(stl_bytes, media_type="model/stl", headers=headers)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+            out_path = export_stl(mesh, os.path.join(tmpdir, "color-layer-relief"))
+            with open(out_path, "rb") as f:
+                stl_bytes = f.read()
+            height_text = ",".join(f"{v:.6f}" for v in final_heights)
+            headers = {
+                "Content-Disposition": 'attachment; filename="color-layer-relief.stl"',
+                "X-Color-Layer-Heights": height_text,
+            }
+            return Response(stl_bytes, media_type="model/stl", headers=headers)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-# Static frontend (served last so the /api routes above win).
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+    # Static frontend (served last so the /api routes above win).
+    app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 @app.get("/")

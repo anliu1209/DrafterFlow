@@ -471,7 +471,9 @@ def build_color_layer_model(
                     solid = solid - outside_hole.extrude(construction_hole_height-construction_base+0.022).translate((0,0,construction_base-0.02))
             # Binary STL stores float32 coordinates: check the delivered file,
             # not merely the double-precision in-memory solid.
-            for tolerance in (0.0001, 0.001):
+            # Prefer the already-supported 1 micron simplification to bound
+            # mesh caches; retain finer geometry as the closed-volume fallback.
+            for tolerance in (0.001, 0.0001):
                 output = solid.simplify(tolerance).to_mesh64()
                 candidate = trimesh.Trimesh(output.vert_properties.copy(), output.tri_verts, process=False)
                 # Map the native canonical levels before the single STL
