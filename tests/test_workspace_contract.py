@@ -12,6 +12,63 @@ class IdParser(HTMLParser):
         self.ids.extend(value for key, value in attrs if key == 'id')
 
 class WorkspaceContractTests(unittest.TestCase):
+    def test_separations_have_optional_names_and_layers_are_renameable(self):
+        html = (ROOT / 'static/index.html').read_text()
+        self.assertNotIn('value="Highlights"', html)
+        app = (ROOT / 'static/app.js').read_text()
+        self.assertIn("separationLayerName(colorLayerName(source), $('#splitLayerName').value)", app)
+        self.assertIn("$('#splitLayerName').value = ''", app)
+        self.assertIn('renameStart(id)', app)
+        panel = (ROOT / 'static/layers-panel.js').read_text()
+        self.assertIn('actions.renameStart(entry.id)', panel)
+        self.assertIn('`Rename ${name}`', panel)
+        workspace = (ROOT / 'static/workspace.js').read_text()
+        self.assertIn("adapter.layers.rename(event.target.value)", workspace)
+
+    def test_default_added_height_is_half_mm_without_overwriting_saved_heights(self):
+        html = (ROOT / 'static/index.html').read_text()
+        self.assertIn('id="colorIncrement" value="0.5"', html)
+        app = (ROOT / 'static/app.js').read_text()
+        self.assertIn("$('#colorIncrement').value = '0.5'", app)
+        self.assertIn("increment: '#colorIncrement'", app)
+        server = (ROOT / 'server.py').read_text()
+        self.assertIn('increment: str = Form("0.5")', server)
+
+    def test_generation_feedback_is_immediate_and_every_success_shows_3d(self):
+        source = (ROOT / 'static/workspace.js').read_text()
+        self.assertIn("generated() { setPreview('3d'); requestRender(); }", source)
+        self.assertNotIn('seenModels', source)
+        self.assertIn('async function runGenerate()', source)
+        self.assertLess(source.index('render();', source.index('async function runGenerate()')), source.index('await operation;'))
+        self.assertIn("addEventListener('click', runGenerate)", source)
+        self.assertIn('workspaceGenerationProgress', source)
+        self.assertIn('adapter.reportError(', source)
+        self.assertIn("location.hash === '#forge' || (rect.top", source)
+
+    def test_color_local_compute_is_default_and_server_is_explicit(self):
+        html = (ROOT / 'static/index.html').read_text()
+        self.assertIn('value="local" selected', html)
+        app = (ROOT / 'static/app.js').read_text()
+        self.assertIn("localCompute.run('analyze'", app)
+        self.assertIn("localCompute.run('generate'", app)
+        self.assertIn('analysisId: colorAnalysis.local_analysis_id', app)
+        self.assertIn("localCompute.reset();", app)
+        local = (ROOT / 'static/local-compute.js').read_text()
+        self.assertNotIn('fetch(', local)
+        self.assertIn("type: 'module'", local)
+        worker = (ROOT / 'static/local-compute-worker.js').read_text()
+        self.assertIn('payload.analysisId !== analysisSequence', worker)
+        self.assertIn('[result.stl]', worker)
+        model = (ROOT / 'static/local-color-model.js').read_text()
+        self.assertIn('closedMesh(delivered)', model)
+        self.assertIn('owned[i].delete()', model)
+
+    def test_four_step_story_and_its_navigation_are_removed(self):
+        html = (ROOT / 'static/index.html').read_text()
+        self.assertNotIn('id="how"', html)
+        self.assertNotIn('href="#how"', html)
+        self.assertNotIn('A short path from image to object.', html)
+
     def test_published_metadata_editor_is_independent_of_open_model(self):
         source = (ROOT / 'static/app.js').read_text()
         self.assertIn('project.creator.id !== currentUser.id', source)
@@ -51,8 +108,17 @@ class WorkspaceContractTests(unittest.TestCase):
             self.assertIn(label, source)
         self.assertIn('application/x-drafterflow-layer', (ROOT / 'static/layers-panel.js').read_text())
 
-    def test_physical_display_order_is_reverse_of_model_order(self):
-        self.assertIn('[...state.layers].reverse()', (ROOT / 'static/layers-panel.js').read_text())
+    def test_physical_display_order_matches_bottom_up_model_order(self):
+        source = (ROOT / 'static/layers-panel.js').read_text()
+        self.assertIn('state.layers.forEach((entry)', source)
+        self.assertNotIn('[...state.layers].reverse()', source)
+        self.assertIn("iconButton('up', `Move ${name} lower`, () => actions.move(index, -1))", source)
+        self.assertIn("iconButton('down', `Move ${name} higher`, () => actions.move(index, 1))", source)
+        workspace = (ROOT / 'static/workspace.js').read_text()
+        self.assertIn('Physical layers, bottom to top', workspace)
+        self.assertIn('BOTTOM · first printed', workspace)
+        self.assertIn('TOP · last printed', workspace)
+        self.assertIn("$('#layerPanel').append($('#layerRelief'))", workspace)
 
     def test_renderer_engine_stamp_does_not_hide_three_canvas(self):
         source = (ROOT / 'static/workspace.js').read_text()
@@ -82,7 +148,7 @@ class WorkspaceContractTests(unittest.TestCase):
 
     def test_home_showcases_actual_chef_pipeline(self):
         html = (ROOT / 'static/index.html').read_text()
-        for asset in ('chef.png', 'chef-model.jpg', 'chef-print.png'):
+        for asset in ('chef.png', 'chef-model-preview.png', 'chef-print.png'):
             self.assertIn('/static/examples/' + asset, html)
             self.assertTrue((ROOT / 'static/examples' / asset).exists())
         self.assertNotIn('data-example="nametag"', html)

@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/STLLoader.js';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
-import { createWorkspace } from './workspace.js';
+import { createWorkspace } from './workspace.js?v=layer-names-1';
+import { separationLayerName } from './layer-names.js?v=layer-names-1';
 import { ModelLifecycle } from './model-state.js';
 import { parseTags, formatTags } from './tag-utils.js';
+import { LocalCompute, localComputeSupported } from './local-compute.js?v=generate-feedback-1';
 
 const $ = (sel) => document.querySelector(sel);
 const num = (el) => { const v = parseFloat(el.value); return isNaN(v) ? 0 : v; };
@@ -11,6 +13,8 @@ const int = (el) => { const v = parseInt(el.value, 10); return isNaN(v) ? 0 : v;
 let workspace = null;
 const colorModelState = new ModelLifecycle(), lineModelState = new ModelLifecycle();
 let colorAnalyzing = false, colorAnalysisRequest = 0;
+const localCompute = new LocalCompute();
+const useLocalColorCompute = () => $('#colorComputeMode').value === 'local';
 let selectedPhysicalLayerId = null;
 
 function markLineDirty(reset = false) {
@@ -1160,7 +1164,6 @@ function setColorStatus(message, kind = '') {
   node.textContent = message;
   node.className = 'status' + (kind ? ' ' + kind : '');
   workspace?.refresh();
-  workspace?.refresh();
 }
 
 function setWorkbenchMode(mode) {
@@ -1284,10 +1287,21 @@ async function analyzeColorLayers(options = {}) {
   button.disabled = true;
   setColorStatus('Analyzing printable regions…');
   try {
-    const response = await fetch('/api/color/analyze', { method: 'POST', body: fd });
-    const data = await response.json();
+    let data;
+    if (useLocalColorCompute()) {
+      data = await localCompute.run('analyze', { file: colorSourceFile, options: {
+        palette_size: int($('#colorPaletteSize')), alpha_threshold: 8,
+        cleanup_min_area: Math.max(0, int($('#colorCleanup'))), width: Math.max(1, num($('#colorWidth'))),
+        remove_background: colorBackgroundRemoved,
+        palette: options.preservePalette === true && colorPalette.length ? colorAnalysis.palette : undefined,
+      } }, message => { if (request === colorAnalysisRequest) setColorStatus(message); });
+    } else {
+      const response = await fetch('/api/color/analyze', { method: 'POST', body: fd });
+      data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Color analysis failed.');
+    }
     if (request !== colorAnalysisRequest) return false;
-    if (!response.ok || !data.ok) throw new Error(data.error || 'Color analysis failed.');
+    if (!data.ok) throw new Error(data.error || 'Color analysis failed.');
     colorAnalysis = data;
     invalidateColorStl();
     colorBackgroundRemoved = data.background_removed === true;
@@ -1319,7 +1333,7 @@ async function analyzeColorLayers(options = {}) {
     renderColorLayers();
     updateColorMetrics();
     fitColorCanvas();
-    setColorStatus(`${colorActivePalette().length} printable layers detected. Arrange higher layers at the top.`, 'ok');
+    setColorStatus(`${colorActivePalette().length} printable layers detected${data.local_analysis_id ? ` · local analysis ${(data.compute_ms / 1000).toFixed(1)}s` : ' · server analysis'}. Layers run bottom → top, in print order.`, 'ok');
     scheduleProjectPersist();
     return true;
   } catch (error) {
@@ -1434,6 +1448,7 @@ function updateColorLayerControls() {
   const destination = $('#regionDestinationSelect'), previousDestination = destination.value;
   destination.innerHTML = '<option value="">New layer</option>';
   const source = colorPalette.find(entry => entry.id === regionTargetId);
+  $('#splitLayerName').placeholder = source ? separationLayerName(colorLayerName(source)) : 'Optional layer name';
   colorPalette.filter(entry => entry.id !== regionTargetId && entry.source_color_id === source?.source_color_id && !entry.ignored).forEach(entry => {
     const option = document.createElement('option'); option.value = entry.id; option.textContent = colorLayerName(entry); destination.appendChild(option);
   });
@@ -1521,11 +1536,14 @@ function splitColorRegions() {
   const selected = new Set(seeds.map(seedKey));
   if (source.region_seeds != null) source.region_seeds = source.region_seeds.filter(seed => !selected.has(seedKey(seed)));
   else source.excluded_region_seeds = [...(source.excluded_region_seeds || []), ...seeds];
-  const layer = destination || { ...source, id: `${source.source_color_id}-split-${Date.now()}`, name: $('#splitLayerName').value.trim() || 'Highlights', region_seeds: seeds, excluded_region_seeds: [], ignored: false, visible: true };
+  const layer = destination || { ...source, id: `${source.source_color_id}-split-${Date.now()}`, name: separationLayerName(colorLayerName(source), $('#splitLayerName').value), region_seeds: seeds, excluded_region_seeds: [], ignored: false, visible: true };
   if (destination) {
     if (layer.region_seeds != null) layer.region_seeds = [...layer.region_seeds, ...seeds.filter(seed => !layer.region_seeds.some(existing => seedKey(existing) === seedKey(seed)))];
     else layer.excluded_region_seeds = (layer.excluded_region_seeds || []).filter(seed => !selected.has(seedKey(seed)));
-  } else colorPalette.push(layer);
+  } else {
+    colorPalette.push(layer);
+    $('#splitLayerName').value = '';
+  }
   selectedColorRegions.clear(); colorSelectionOverlay = null; regionSelecting = false;
   previewLayerId = layer.id;
   selectedPhysicalLayerId = layer.id;
@@ -1931,22 +1949,31 @@ async function generateColorLayers() {
   const token = colorModelState.begin();
   setColorStatus('Tracing masks, extruding ordered relief, and combining the STL…');
   try {
-    const response = await fetch('/api/color/generate', { method: 'POST', body: fd });
-    if (!response.ok) {
-      let message = 'Color STL generation failed.';
-      try { const body = await response.json(); message = body.error || body.detail || message; } catch (_) { /* non-JSON fallback */ }
-      throw new Error(message);
+    let blob, computeMs = null;
+    if (useLocalColorCompute()) {
+      const result = await localCompute.run('generate', { analysisId: colorAnalysis.local_analysis_id, options: {
+        width, base, increment, layers: serializablePalette(),
+        base_hole: $('#colorHoleEnabled').checked ? JSON.parse(fd.get('base_hole')) : null,
+      } }, message => { if (colorModelState.accepts(token)) setColorStatus(message); });
+      blob = new Blob([result.stl], { type: 'model/stl' }); computeMs = result.compute_ms;
+    } else {
+      const response = await fetch('/api/color/generate', { method: 'POST', body: fd });
+      if (!response.ok) {
+        let message = 'Color STL generation failed.';
+        try { const body = await response.json(); message = body.error || body.detail || message; } catch (_) { /* non-JSON fallback */ }
+        throw new Error(message);
+      }
+      blob = await response.blob();
     }
-    const blob = await response.blob();
     if (!colorModelState.accepts(token)) { setColorStatus('Settings changed during generation. Update Model to use your latest edits.'); return; }
     if (!await loadColorStl(blob, token)) return;
     colorStlBlob = blob;
     colorModelState.complete(token);
     $('#colorDownloadBtn').disabled = false;
-    setColorStatus(`Color STL ready · ${fmtSize(colorStlBlob.size)}`, 'ok');
+    setColorStatus(`Color STL ready · ${fmtSize(colorStlBlob.size)} · ${computeMs == null ? 'server' : `local ${(computeMs / 1000).toFixed(1)}s`}`, 'ok');
     workspace?.generated(colorModelState);
   } catch (error) {
-    setColorStatus(error.message || 'Color STL generation failed.', 'err');
+    if (colorModelState.accepts(token)) setColorStatus(error.message || 'Color STL generation failed.', 'err');
   } finally {
     colorModelState.finish(token);
     button.disabled = false;
@@ -1975,6 +2002,13 @@ function setupColorDropzone() {
 
 function initColorLayerMode() {
   initColorThree(); setupColorCanvas(); setupColorDropzone();
+  // Desktop-first, but do not silently upload when a browser lacks WASM/Workers.
+  $('#colorComputeMode').value = 'local';
+  if (!localComputeSupported()) $('#colorComputeHelp').textContent = 'Local processing is unavailable in this browser. Choose Server explicitly to upload for processing.';
+  $('#colorComputeMode').addEventListener('change', () => {
+    localCompute.reset();
+    if (colorSourceFile) analyzeColorLayers({ preservePalette: true });
+  });
   $('#lineModeTab').addEventListener('click', () => setWorkbenchMode('line'));
   $('#colorModeTab').addEventListener('click', () => setWorkbenchMode('color'));
   $('#colorAnalyzeBtn').addEventListener('click', analyzeColorLayers);
@@ -2052,6 +2086,13 @@ function workspaceAdapter() {
     },
     layers: {
       select:selectLayer,
+      renameStart(id) {
+        selectLayer(id);
+        requestAnimationFrame(() => {
+          const input = $('#workspaceLayerName');
+          input.focus(); input.select();
+        });
+      },
       move:moveColorLayer,
       reorder(fromId,toId) {
         const from=colorPalette.findIndex(entry=>entry.id===fromId), to=colorPalette.findIndex(entry=>entry.id===toId);
@@ -2075,6 +2116,7 @@ function workspaceAdapter() {
     },
     fit:fitWorkspacePreview,
     generate:()=>activeMode==='color'?generateColorLayers():generate(),
+    reportError:message=>activeMode==='color'?setColorStatus(message,'err'):setStatus(message,'err'),
     download:()=>activeMode==='color'?downloadColorStl():download(),
     analyze:()=>activeMode==='color'?analyzeColorLayers():analyze(),
     upload:()=>$(activeMode==='color'?'#colorFileInput':'#fileInput').click(),
@@ -2393,6 +2435,7 @@ function clearProject() {
   selectedColorRegions.clear(); colorSelectionOverlay = null; regionSelecting = false;
   stlBlob = null; invalidateColorStl(true); markLineDirty(true);
   $('#colorHoleEnabled').checked = false; colorHolePlacing = false;
+  $('#colorIncrement').value = '0.5';
   $('#projectTitle').value = 'Untitled project'; $('#maskEmpty').hidden = false; $('#colorMaskEmpty').hidden = false;
   $('#holeCard').hidden = true; $('#origThumb').hidden = true; $('#colorOrigThumb').hidden = true;
   $('#downloadBtn').disabled = true; $('#colorDownloadBtn').disabled = true;

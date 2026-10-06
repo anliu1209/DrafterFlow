@@ -586,7 +586,7 @@ def generate_color_layers(
     file: UploadFile = File(...),
     width: str = Form("80"),
     base: str = Form("0.4"),
-    increment: str = Form("0.2"),
+    increment: str = Form("0.5"),
     alpha_threshold: str = Form("8"),
     cleanup_min_area: str = Form("0"),
     palette: str = Form(...),
@@ -608,7 +608,7 @@ def generate_color_layers(
             raise HTTPException(400, "Uploaded file is empty.")
         width_mm = _num(width, 80.0, "model width")
         base_thickness = _num(base, 0.4, "base thickness")
-        height_increment = _num(increment, 0.2, "height increment")
+        height_increment = _num(increment, 0.5, "height increment")
         alpha = _int(alpha_threshold, 8, "alpha threshold")
         cleanup = _int(cleanup_min_area, 0, "cleanup size")
         submitted_palette = _parse_color_palette(palette)

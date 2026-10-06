@@ -65,6 +65,34 @@ python3 -m venv .venv
 **Color Layer Mode** 使用独立的 `color_layers → vectorize → model_builder` 分支，因此原有线稿行为不会被改写。
 项目、账号和社区记录使用本地 SQLite（默认 `data/drafterflow.db`）；几何管道仍无需重写。
 
+### 电脑端本地计算（Color Mode）
+
+Color Mode 默认在浏览器的 module Web Worker 内完成分色、背景移除、四连通区域识别、
+轮廓追踪、实体合并和二进制 STL 导出。几何引擎是随站点提供的 Manifold 3.5.4 WebAssembly，
+首次生成下载约 529 KiB；无需安装桌面软件。后续调整顺序、拆层、尺寸、厚度或挂孔复用
+Worker 中的分析结果和轮廓缓存，不重复上传/解码/分色。生成时界面仍可操作，过期结果不能导出。
+
+- **Geometry → Advanced → Color processing**：默认 `On this computer`；手动选择 `Server`
+  才会调用原来的 `/api/color/analyze` 和 `/api/color/generate`。本地失败不会自动上传。
+- 新项目的 **Default layer height** 为 0.5 mm（每层新增厚度）；打开已有项目仍恢复其保存值。
+  点击生成会立即显示阶段和耗时，每次成功都切换到 3D；失败信息也显示在预览区。
+  本地任务超过 120 秒会终止并解锁按钮，可重新 Analyze Image 再试，不会一直无响应。
+- 建议使用当前版本的电脑浏览器（需 Worker、OffscreenCanvas、createImageBitmap、WebAssembly）；
+  本地图片上限 1600 万像素。手机或不支持的浏览器可自行选择服务器。
+- 保留同色区域拆层、累积打印足迹、独立层高、仅穿底座的孔和独立挂耳高度。
+  导出前验证 STL float32 顶点的闭合边、方向和正体积；不交付开放模型。
+- 本地轮廓采用约 0.6 源像素容差的简化，非 Python Potrace 的逐顶点复制；
+  服务器处理作为原有轮廓算法的备用。Line Art / Stroke extraction 暂仍使用原有服务器管线。
+- “本地”指上述计算；账号、Community、Share、Publish 和已保存项目的自动保存仍使用服务器，
+  保存或发布项目依然会上传原图和编辑状态。访客草稿只保存在浏览器。
+
+回归测试：
+
+```bash
+node --test tests/test_local_compute.mjs tests/test_workspace.mjs tests/test_tags.mjs
+.venv/bin/python -m unittest discover -s tests
+```
+
 ## 账号、项目与 Community
 
 核心创作一直是访客可用的：上传、分析、编辑、预览和下载 STL 都不会出现登录墙。浏览器会把

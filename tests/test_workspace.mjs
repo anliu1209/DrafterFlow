@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ModelLifecycle } from '../static/model-state.js';
+import { separationLayerName } from '../static/layer-names.js';
+
+test('unnamed separations identify their source layer', () => {
+  assert.equal(separationLayerName('Layer 2'), 'Separation from Layer 2');
+  assert.equal(separationLayerName('Layer 5', '  '), 'Separation from Layer 5');
+  assert.equal(separationLayerName('Hair'), 'Separation from Hair');
+});
+test('explicit separation names take precedence', () => {
+  assert.equal(separationLayerName('Layer 2', '  Eye highlights  '), 'Eye highlights');
+  assert.equal(separationLayerName('Layer 2', '裤子'), '裤子');
+});
 
 test('new models are not exportable before generation', () => {
   const state = new ModelLifecycle();

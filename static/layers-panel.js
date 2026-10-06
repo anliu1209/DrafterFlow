@@ -20,14 +20,14 @@ const iconButton = (icon, label, action) => {
   button.innerHTML = svg(icon); button.addEventListener('click', action); return button;
 };
 
-// Display order is deliberately reversed; the model and saved project remain bottom-up.
+// Display and model order both run bottom-to-top (first printed layer first).
 export function renderLayerList(root, state, actions) {
   root.replaceChildren();
   if (!state.layers.length) {
     root.append(node('div', 'ws-layer-empty', 'Your physical layers will appear here after analysis.')); return;
   }
   const heights = new Map(state.bands.map(band => [band.entry.id, band]));
-  [...state.layers].reverse().forEach((entry) => {
+  state.layers.forEach((entry) => {
     const index = state.layers.indexOf(entry), band = heights.get(entry.id), name = entry.name || `Layer ${index + 1}`;
     const row = node('div', 'ws-layer' + (entry.id === state.selectedId ? ' is-selected' : '') + (entry.ignored ? ' is-excluded' : ''));
     row.dataset.layerId = entry.id; row.tabIndex = 0; row.setAttribute('role', 'listitem'); row.setAttribute('aria-label', `${name}, physical layer ${index + 1}${entry.ignored ? ', excluded' : ''}`);
@@ -66,14 +66,19 @@ export function renderLayerList(root, state, actions) {
     row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
     row.addEventListener('drop', event => { event.preventDefault(); const from = event.dataTransfer.getData('application/x-drafterflow-layer'); row.classList.remove('is-drop-target'); if (from && from !== entry.id) actions.reorder(from, entry.id); });
     const swatch = node('span', 'ws-swatch'); swatch.style.background = entry.hex;
-    const title = node('div', 'ws-layer-copy'); title.append(node('strong', '', name), node('span', '', band ? `Layer ${index + 1} · +${band.thickness.toFixed(2)} mm` : entry.pixel_count ? 'Excluded from model' : 'No regions remaining'));
+    const nameButton = node('button', 'ws-layer-name', name);
+    nameButton.type = 'button'; nameButton.title = `Rename ${name}`;
+    nameButton.setAttribute('aria-label', `Rename ${name}`);
+    nameButton.disabled = state.analyzing;
+    nameButton.addEventListener('click', () => actions.renameStart(entry.id));
+    const title = node('div', 'ws-layer-copy'); title.append(nameButton, node('span', '', band ? `Layer ${index + 1} · +${band.thickness.toFixed(2)} mm` : entry.pixel_count ? 'Excluded from model' : 'No regions remaining'));
     const eye = iconButton(entry.visible ? 'eye' : 'hidden', `${entry.visible ? 'Hide' : 'Show'} ${name} regions`, () => actions.visibility(entry.id));
     eye.setAttribute('aria-pressed', String(entry.visible));
     eye.disabled = state.analyzing;
     const order = node('div', 'ws-layer-order');
-    const higher = iconButton('up', `Move ${name} higher`, () => actions.move(index, 1)); higher.disabled = state.analyzing || index === state.layers.length - 1;
-    const lower = iconButton('down', `Move ${name} lower`, () => actions.move(index, -1)); lower.disabled = state.analyzing || index === 0;
-    order.append(higher, lower);
+    const lower = iconButton('up', `Move ${name} lower`, () => actions.move(index, -1)); lower.disabled = state.analyzing || index === 0;
+    const higher = iconButton('down', `Move ${name} higher`, () => actions.move(index, 1)); higher.disabled = state.analyzing || index === state.layers.length - 1;
+    order.append(lower, higher);
     const choose = () => { if (!state.analyzing) actions.select(entry.id); };
     row.addEventListener('click', event => { if (!event.target.closest('button,input')) choose(); });
     row.addEventListener('keydown', event => { if (event.target === row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); choose(); } });

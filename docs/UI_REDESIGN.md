@@ -11,7 +11,7 @@ framework or routing library is needed. Hash navigation and `/s/:code` already e
 | `colorSourceFile`, `setColorSource`, `setupColorDropzone` | Artwork panel + central upload state; keep drag/drop and file types |
 | `colorAnalysis`, `analyzeColorLayers`, `colorPaletteSize` | Visible Target colors + Analyze Image; segmentation remains `/api/color/analyze` |
 | `backgroundCandidateId`, `setBackgroundRemoved` | Always-present background status, Remove / Restore in Artwork |
-| `colorPalette` (internally bottom → top) | Single Layers list displayed top → bottom; rows use stable entry IDs |
+| `colorPalette` (internally bottom → top) | Single Layers list displayed bottom → top in print order; rows use stable entry IDs |
 | `colorLayerBands`, entry `height_mm` | Selected-layer inspector + bulk height controls; default/uniform heights in Geometry |
 | `colorRegionPixels`, `colorRegionOwners`, seed lists | Regions view and region inspector; preserve tiny-feature hit testing and multi-selection |
 | `splitColorRegions` | Distinct Move to existing / Separate new actions; existing destinations retain same-pigment restriction |

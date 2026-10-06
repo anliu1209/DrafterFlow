@@ -6,7 +6,7 @@
 <title>DrafterFlow · Turn your drawings into physical objects</title>
 <meta name="description" content="DrafterFlow turns 2D drawings and line art into manufacturable 3D relief models you can 3D print without CAD experience.">
 <link rel="stylesheet" href="/static/style.css?v=compact-gallery-2">
-<link rel="stylesheet" href="/static/workspace.css?v=chibi-tags-3">
+<link rel="stylesheet" href="/static/workspace.css?v=chef-screenshot-1">
 <script type="importmap">
 { "imports": { "three": "/static/vendor/three.module.js", "three/addons/": "/static/vendor/" } }
 </script>
@@ -25,7 +25,6 @@
     <a href="#forge">Create</a>
     <a href="#community">Community</a>
     <a href="#projects" id="projectsNav" hidden>My Projects</a>
-    <a href="#how" data-i18n="nav_how">How it works</a>
     <a href="#about" data-i18n="nav_about">About</a>
   </nav>
   <div class="header-actions">
@@ -54,7 +53,6 @@
     <p class="hero-sub" data-i18n="hero_sub">Turn illustrations, artwork and designs into printable layered models — without CAD.</p>
     <div class="hero-cta">
       <a class="btn btn-primary btn-lg" href="#forge" data-i18n="cta_create">Create a 3D model</a>
-      <a class="btn btn-ghost btn-lg" href="#how" data-i18n="cta_how">How it works</a>
     </div>
 
     <div class="hero-visual">
@@ -64,27 +62,12 @@
       </div>
       <div class="hv-card">
         <span class="hv-label" data-i18n="hv_layers">Generated model</span>
-        <div class="hv-frame"><img id="heroLayers" src="/static/examples/chef-model.jpg?v=studio-light" alt="Chef model captured from DrafterFlow's 3D preview" draggable="false"></div>
+        <div class="hv-frame"><img id="heroLayers" src="/static/examples/chef-model-preview.png?v=chef-screenshot-1" alt="Chef model captured from DrafterFlow's 3D preview" draggable="false"></div>
       </div>
       <div class="hv-card hv-card--solid">
         <span class="hv-label" data-i18n="hv_printable">Actual print</span>
         <div class="hv-frame"><img src="/static/examples/chef-print.png" alt="User-provided photo of the printed chef charm" draggable="false"></div>
       </div>
-    </div>
-  </section>
-
-  <!-- ============ PRODUCT STORY ============ -->
-  <section class="section story" id="how">
-    <div class="section-head">
-      <p class="eyebrow">From sketch to shelf</p>
-      <h2 class="section-title">A short path from image to object.</h2>
-      <p class="section-sub">DrafterFlow keeps the creative part simple and makes the printable geometry visible at every step.</p>
-    </div>
-    <div class="story-grid">
-      <article class="story-step"><span class="story-index">01</span><div class="story-art story-art--upload"><span>PNG</span><i></i></div><h3>Upload your image</h3><p>Start with line art, a logo, or a flat-colour illustration.</p></article>
-      <article class="story-step"><span class="story-index">02</span><div class="story-art story-art--layers"><i></i><i></i><i></i></div><h3>Organize layers</h3><p>Separate regions, set their heights and decide what goes on top.</p></article>
-      <article class="story-step"><span class="story-index">03</span><div class="story-art story-art--controls"><i></i><i></i><i></i></div><h3>Generate a model</h3><p>Inspect the print plan and stepped 3D result. Revise whenever you need.</p></article>
-      <article class="story-step"><span class="story-index">04</span><div class="story-art story-art--print"><div></div><span>print-ready</span></div><h3>Print it. Hold it.</h3><p>Export your STL, prepare filament changes in your slicer, and make it real.</p></article>
     </div>
   </section>
 
@@ -350,7 +333,7 @@
             <button class="btn btn-ghost btn-sm" id="selectColorRegions" type="button">Select regions on image</button>
             <label for="regionDestinationSelect">Move selection to</label>
             <select id="regionDestinationSelect" aria-label="Destination layer"><option value="">New layer</option></select>
-            <input id="splitLayerName" aria-label="New layer name" value="Highlights" maxlength="80">
+            <input id="splitLayerName" aria-label="New layer name" placeholder="Optional layer name" maxlength="80">
             <button class="btn btn-ghost btn-sm" id="splitColorRegions" type="button" disabled>Move selected regions to new layer</button>
             <button class="btn btn-ghost btn-sm" id="clearColorRegions" type="button">Clear selection</button>
             <p id="regionSelectionInfo">Select a layer, then click separate regions such as eye and hair highlights. The new layer keeps the same colour and can be moved higher.</p>
@@ -367,10 +350,15 @@
             <label class="field-label" for="colorBase"><span>Base thickness</span><span class="field-value"><input type="number" id="colorBase" value="0.4" min="0.1" max="10" step="0.1"> mm</span></label>
           </div>
           <div class="field">
-            <label class="field-label" for="colorIncrement"><span>Height increment</span><span class="field-value"><input type="number" id="colorIncrement" value="0.2" min="0.05" max="5" step="0.05"> mm</span></label>
+            <label class="field-label" for="colorIncrement"><span>Height increment</span><span class="field-value"><input type="number" id="colorIncrement" value="0.5" min="0.05" max="5" step="0.05"> mm</span></label>
           </div>
           <details class="advanced">
             <summary>Advanced · layer heights &amp; cleanup</summary>
+            <div class="field">
+              <label class="field-label" for="colorComputeMode">Color processing</label>
+              <select id="colorComputeMode"><option value="local" selected>On this computer · recommended for desktop</option><option value="server">Server · upload artwork for processing</option></select>
+              <p class="field-help" id="colorComputeHelp">Color analysis and STL generation run in a browser background thread. Reordering or changing heights reuses local analysis. Server processing is an explicit fallback. Line Art currently uses the server.</p>
+            </div>
             <div class="field">
               <p class="field-help">Layer height is the thickness added by that layer, not its final Z. Blank uses Height increment. Heights follow layers when reordered; base thickness is set above.</p>
               <div id="colorLayerHeights"></div>
@@ -584,6 +572,6 @@
   </form>
 </div>
 
-<script type="module" src="/static/app.js?v=chibi-tags-3"></script>
+<script type="module" src="/static/app.js?v=layer-names-1"></script>
 </body>
 </html>

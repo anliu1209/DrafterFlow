@@ -1,4 +1,4 @@
-import { renderLayerList, syncLayerInspector, svg } from './layers-panel.js';
+import { renderLayerList, syncLayerInspector, svg } from './layers-panel.js?v=layer-names-1';
 
 const $ = selector => document.querySelector(selector);
 const move = (selector, target) => { const element = typeof selector === 'string' ? $(selector) : selector; if (element) $(target).append(element); return element; };
@@ -35,6 +35,8 @@ export function createWorkspace(adapter) {
         <div class="ws-artwork checker" id="workspaceArtworkViewport"><img id="workspaceArtworkImage" alt="Original artwork" draggable="false"></div>
         <div class="ws-empty" id="workspaceEmpty"><div class="ws-empty-art" aria-hidden="true"><span></span><span></span><span></span>${svg('image')}</div><span class="ws-kicker">THE IMAGE IS THE CANVAS.</span><h2>Make something<br>you can hold.</h2><p>A drawing, illustration or logo.<br>We’ll turn its regions into physical layers.</p><button type="button" id="workspaceUpload" class="btn btn-primary">${svg('upload')}Upload Image</button><span class="ws-help">or drop an image here · PNG / JPG / WEBP</span><button type="button" id="workspaceExample" class="ws-text-button">Try a two-color drawing</button></div>
         <div class="ws-stale" id="workspaceStale" hidden><span>Model has changes.</span><button type="button" id="workspaceStaleUpdate" class="ws-text-button">Update Model</button></div>
+        <div class="ws-generation-progress" id="workspaceGenerationProgress" hidden aria-live="polite"><span class="ws-spinner" aria-hidden="true"></span><div><strong>Generating model</strong><p id="workspaceGenerationPhase"></p></div></div>
+        <div class="ws-generation-progress ws-generation-error" id="workspaceGenerationError" hidden role="alert"></div>
         <div class="ws-tool-message" id="workspaceToolMessage" hidden><span id="workspaceToolMessageText"></span><button type="button" id="workspaceCancelTool" class="ws-text-button">Cancel</button></div>
       </div>
       <div class="ws-canvas-footer"><span id="workspaceCanvasMeta">No image selected</span><div id="workspaceColorPreviewToolbar" data-engine="color"></div><div id="workspaceLinePreviewToolbar" data-engine="line" hidden></div></div>
@@ -43,9 +45,9 @@ export function createWorkspace(adapter) {
     </section>
     <aside class="ws-layers" aria-label="Layers and inspector">
       <div class="ws-panel-heading"><div><h2>Layers <span id="workspaceLayerCount">0</span></h2><p>The layers are the model.</p></div><button class="ws-icon ws-drawer-close" data-close-sidebar aria-label="Close layers">${svg('close')}</button></div>
-      <div class="ws-stack-label"><span>TOP · higher / front</span>${svg('up')}</div>
-      <div class="ws-layer-list" id="workspaceLayerList" role="list" aria-label="Physical layers, top to bottom" data-engine="color"></div><div id="workspaceLegacyLayers" data-engine="line" hidden></div>
-      <div class="ws-stack-label ws-stack-bottom"><span>BOTTOM · lower / back</span><span id="workspaceStackHeight">0 mm</span></div>
+      <div class="ws-stack-label"><span>BOTTOM · first printed</span>${svg('down')}</div>
+      <div class="ws-layer-list" id="workspaceLayerList" role="list" aria-label="Physical layers, bottom to top" data-engine="color"></div><div id="workspaceLegacyLayers" data-engine="line" hidden></div>
+      <div class="ws-stack-label ws-stack-bottom"><span>TOP · last printed</span><span id="workspaceStackHeight">0 mm</span></div>
       <div class="ws-inspector-scroll">
         <section class="ws-inspector" id="workspaceLayerInspector" data-engine="color" hidden><div class="ws-inspector-title"><h3>Layer settings</h3><span id="workspaceLayerSwatch" class="ws-swatch"></span></div><label for="workspaceLayerName">Name</label><input id="workspaceLayerName" maxlength="80" autocomplete="off"><label class="ws-number-label" for="workspaceLayerHeight"><span>Height added</span><span class="ws-number"><input id="workspaceLayerHeight" type="number" min="0.05" max="30" step="0.05" aria-describedby="workspaceHeightHelp">mm</span></label><p class="ws-help" id="workspaceHeightHelp">Added thickness, not absolute Z. Blank uses the default.</p><div class="ws-inspector-meta"><span id="workspaceLayerTop"></span><span id="workspaceRegionCount"></span></div><label class="ws-check"><input id="workspaceIncludeLayer" type="checkbox">Include in model</label></section>
         <section class="ws-region-inspector" id="workspaceRegionInspector" data-engine="color"><div class="ws-inspector-title"><h3>Regions</h3><span id="workspaceSelectedCount">0 selected</span></div><div id="workspaceRegionTools"></div><p class="ws-help" id="workspaceRegionEmpty">Select a layer to edit its connected regions.</p></section>
@@ -80,7 +82,7 @@ export function createWorkspace(adapter) {
   move(colorCards[2], '#workspaceColorGeometry'); colorCards[2].querySelector('h3').textContent = 'Geometry';
   $('#colorIncrement').closest('label').querySelector('span').textContent = 'Default layer height';
   const uniform = move('#colorResetHeights', '#workspaceColorGeometry'); uniform.textContent = 'Apply Uniform Heights';
-  colorCards[2].querySelector('summary').textContent = 'Advanced · heights & cleanup';
+  colorCards[2].querySelector('summary').textContent = 'Advanced · processing, heights & cleanup';
   move(colorCards[3], '#workspaceColorKeychain'); colorCards[3].querySelector('h3').textContent = 'Hanging tab';
   move('#colorPlanCard', '#workspacePrintPlan'); $('#colorPlanCard .card-title').textContent = 'Physical print heights';
   move('#colorCanvasWrap', '#workspacePreview'); move('#colorViewport', '#workspacePreview');
@@ -94,7 +96,7 @@ export function createWorkspace(adapter) {
   move(lineCards[2], '#workspaceLineKeychain');
   move('#tools', '#workspaceLineKeychain'); move('#lineWorkbench .size-controls', '#workspaceLineKeychain'); move('#snapToggle', '#workspaceLineKeychain');
   move(lineCards[3], '#workspaceLegacyInspector'); move(lineCards[4], '#workspaceLinePrintPlan');
-  move('#layerPanel', '#workspaceLegacyLayers'); $('#layerPanel').prepend($('#layerRelief'));
+  move('#layerPanel', '#workspaceLegacyLayers'); $('#layerPanel').append($('#layerRelief'));
   const legacyToolbar = $('#lineWorkbench .editor-bottom'); move(legacyToolbar, '#workspaceLinePreviewToolbar');
   move('#canvasWrap', '#workspacePreview'); move('#viewport', '#workspacePreview');
   for (const selector of ['#generateBtn','#downloadBtn','#status','#origThumb']) move(selector, '#workspaceInternals');
@@ -103,14 +105,14 @@ export function createWorkspace(adapter) {
 
   const separate = document.createElement('button'); separate.id = 'workspaceSeparate'; separate.className = 'btn btn-ghost'; separate.type = 'button'; separate.textContent = 'Separate into New Layer';
   $('#splitColorRegions').after(separate);
-  const newNameLabel = document.createElement('label'); newNameLabel.htmlFor = 'splitLayerName'; newNameLabel.textContent = 'New layer name'; $('#splitLayerName').before(newNameLabel);
+  const newNameLabel = document.createElement('label'); newNameLabel.htmlFor = 'splitLayerName'; newNameLabel.textContent = 'New layer name (optional)'; $('#splitLayerName').before(newNameLabel);
   $('#regionTools > label[for="regionLayerSelect"]').textContent = 'Selected layer';
   $('#regionTools > label[for="regionDestinationSelect"]').textContent = 'Move to existing layer';
   $('#selectColorRegions').textContent = 'Select regions on artwork';
   $('#splitColorRegions').textContent = 'Move to Layer';
 
   let preview = 'artwork', artworkVersion = 'original', pendingRender = false, layerSignature = '', inspectorSelection = null;
-  const seenModels = new WeakSet();
+  let generationStartedAt = null, generationTimer = null;
 
   function setTools(category) {
     root.querySelectorAll('[data-tools]').forEach(panel => { panel.hidden = panel.dataset.tools !== category; });
@@ -135,7 +137,7 @@ export function createWorkspace(adapter) {
     $('#workspacePrintNotes').hidden = preview !== 'print' || !state.analyzed;
     $('#workspaceEmpty').hidden = Boolean(state.source) || preview === '3d';
     $('#workspaceViewHelp').textContent = preview === '3d' ? 'Rotate · zoom · pan' : preview === 'print' ? 'Includes support for every higher region' : '';
-    $('#workspaceStale').hidden = !state.model.dirty || preview !== '3d';
+    $('#workspaceStale').hidden = state.model.generating || !state.model.dirty || preview !== '3d';
     $('#workspaceColorPreviewToolbar').hidden = isLine || preview === '3d' || preview === 'artwork';
     $('#workspaceLinePreviewToolbar').hidden = !isLine || preview === '3d' || preview === 'artwork';
     const toolActive = state.selecting || state.placing;
@@ -177,11 +179,21 @@ export function createWorkspace(adapter) {
     $('#workspaceCanvasMeta').textContent = state.analyzed ? `${state.wpx} × ${state.hpx} px · ${state.count} layers` : state.filename || 'No image selected';
     $('#workspaceStatus').textContent = state.status || 'Ready when you are.';
     const statusError = state.statusKind === 'err'; $('.ws-status-bar').classList.toggle('is-error', statusError);
+    $('#workspaceGenerationError').hidden = !statusError || model.generating;
+    $('#workspaceGenerationError').textContent = state.status || '';
     $('#workspaceModelState').textContent = model.generating ? 'Generating…' : model.current ? 'Model current' : model.dirty ? 'Changes not generated' : 'No model yet';
+    if (model.generating && generationStartedAt === null) {
+      generationStartedAt = performance.now(); generationTimer = setInterval(requestRender, 1000);
+    } else if (!model.generating && generationStartedAt !== null) {
+      clearInterval(generationTimer); generationTimer = null; generationStartedAt = null;
+    }
+    const elapsed = generationStartedAt === null ? 0 : Math.floor((performance.now() - generationStartedAt) / 1000);
+    $('#workspaceGenerationProgress').hidden = !model.generating;
+    $('#workspaceGenerationPhase').textContent = `${state.status || 'Preparing geometry…'} · ${elapsed}s elapsed`;
     const generate = $('#workspaceGenerateBtn');
     generate.disabled = model.generating || state.analyzing || !state.analyzed || !state.count;
     generate.classList.toggle('is-generating', model.generating); generate.classList.toggle('is-current', model.current);
-    generate.innerHTML = model.generating ? '<span class="ws-spinner" aria-hidden="true"></span>Generating…' : model.current ? `${svg('check')}Model Updated` : model.dirty ? 'Update Model' : 'Generate Model';
+    generate.innerHTML = model.generating ? `<span class="ws-spinner" aria-hidden="true"></span>Generating… ${elapsed}s` : model.current ? `${svg('check')}Model Updated` : model.dirty ? 'Update Model' : 'Generate Model';
     generate.setAttribute('aria-busy', String(model.generating));
     $('#workspaceExport').disabled = !model.current || model.generating;
     $('#workspaceDownload').disabled = !model.current || model.generating;
@@ -233,8 +245,18 @@ export function createWorkspace(adapter) {
     button.addEventListener('keydown', event => { if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return; event.preventDefault(); const buttons = [...root.querySelectorAll('[data-preview]')], index = buttons.indexOf(button), next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length-1 : (index+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length; setPreview(buttons[next].dataset.preview); buttons[next].focus(); });
   });
   root.querySelectorAll('[data-artwork-version]').forEach(button => button.addEventListener('click', () => { artworkVersion = button.dataset.artworkVersion; root.querySelectorAll('[data-artwork-version]').forEach(b => b.setAttribute('aria-pressed', String(b===button))); setPreview('artwork'); }));
-  $('#workspaceGenerateBtn').addEventListener('click', () => adapter.generate());
-  $('#workspaceStaleUpdate').addEventListener('click', () => adapter.generate());
+  async function runGenerate() {
+    try {
+      const operation = adapter.generate();
+      // Show feedback synchronously, before any Worker/network response.
+      render();
+      await operation;
+    } catch (error) {
+      adapter.reportError(error.message || 'Model generation failed. Please try again.');
+    } finally { render(); }
+  }
+  $('#workspaceGenerateBtn').addEventListener('click', runGenerate);
+  $('#workspaceStaleUpdate').addEventListener('click', runGenerate);
   $('#workspaceExport').addEventListener('click', () => { renderExport(); exportDrawer.showModal(); });
   $('#workspaceCloseExport').addEventListener('click', () => exportDrawer.close());
   $('#workspaceDownload').addEventListener('click', () => adapter.download());
@@ -275,7 +297,9 @@ export function createWorkspace(adapter) {
   };
   const updateHeader = () => {
     const rect = $('#forge').getBoundingClientRect();
-    document.body.classList.toggle('is-editing', rect.top < window.innerHeight * .75 && rect.bottom > 160);
+    // Explicit editor navigation keeps its actions available while async
+    // artwork/model layout changes or scroll anchoring move the section.
+    document.body.classList.toggle('is-editing', location.hash === '#forge' || (rect.top < window.innerHeight * .75 && rect.bottom > 160));
   };
   $('#headerCreate').addEventListener('click', () => { location.hash = 'forge'; enterStudio(); });
   window.addEventListener('scroll', updateHeader, {passive:true}); window.addEventListener('hashchange', syncRoute); syncRoute();
@@ -283,8 +307,8 @@ export function createWorkspace(adapter) {
 
   return {
     refresh: requestRender, setEngine, setPreview, setTools,
-    resetModel(model) { seenModels.delete(model); },
+    resetModel() { requestRender(); },
     get preview() { return preview; }, get artworkVersion() { return artworkVersion; },
-    generated(model) { if (!seenModels.has(model)) { seenModels.add(model); setPreview('3d'); } requestRender(); },
+    generated() { setPreview('3d'); requestRender(); },
   };
 }
