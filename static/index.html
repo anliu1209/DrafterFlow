@@ -84,7 +84,12 @@
       <p class="forge-note" data-i18n="forge_note">No CAD experience required.</p>
     </div>
 
-    <div class="forge-grid">
+    <div class="mode-switch" role="tablist" aria-label="Model mode">
+      <button class="mode-tab is-active" id="lineModeTab" type="button" role="tab" aria-selected="true">Line Mode</button>
+      <button class="mode-tab" id="colorModeTab" type="button" role="tab" aria-selected="false">Color Layer Mode</button>
+    </div>
+
+    <div class="forge-grid" id="lineWorkbench">
       <aside class="rail">
         <section class="card">
           <h3 class="card-title"><span data-i18n="card_drawing">Drawing</span></h3>
@@ -267,6 +272,144 @@
           <button class="vp-reset" id="resetView" hidden data-i18n="vp_reset">Reset view</button>
           <div class="vp-info" id="vpInfo" hidden></div>
         </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Color Layer Mode intentionally has its own workbench. The original line
+         editor stays untouched above so its hole-placement workflow remains a
+         focused tool instead of accumulating unrelated controls. -->
+    <div class="forge-grid color-workbench" id="colorWorkbench" hidden>
+      <aside class="rail color-rail">
+        <section class="card">
+          <h3 class="card-title">Flat-colour artwork</h3>
+          <div class="dropzone" id="colorDropzone" role="button" tabindex="0">
+            <input type="file" id="colorFileInput" accept="image/png,image/jpeg,image/jpg,image/webp" hidden>
+            <div class="dz-inner">
+              <svg class="dz-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4m0 0L7 9m5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <p class="dz-main">Drop an illustration here, or <span class="link">choose an image</span></p>
+              <p class="dz-hint">PNG · JPG · WEBP · flat colours work best</p>
+            </div>
+          </div>
+          <p class="color-note">Transparent pixels create no geometry. For an opaque image, remove a detected edge background before generating.</p>
+          <div class="background-tools" id="backgroundTools" hidden>
+            <div><b>Background</b><p id="backgroundHint">No background candidate detected.</p></div>
+            <button class="btn btn-ghost btn-sm" id="removeBackgroundBtn" type="button">Remove detected background</button>
+            <button class="btn btn-ghost btn-sm" id="restoreBackgroundBtn" type="button" hidden>Restore</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Palette &amp; order</h3>
+          <div class="color-palette-head">
+            <label class="field-label" for="colorPaletteSize"><span>Target colours</span>
+              <select id="colorPaletteSize" aria-label="Number of colours">
+                <option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option>
+              </select>
+            </label>
+            <button class="btn btn-ghost btn-sm" id="colorAnalyzeBtn" type="button">Analyze</button>
+          </div>
+          <p class="palette-direction">Bottom → Top · colours higher in this list become higher parts of the relief.</p>
+          <div class="color-palette-list" id="colorPaletteList" aria-live="polite">
+            <p class="palette-empty">Upload a flat-colour illustration to detect its palette.</p>
+          </div>
+          <div class="region-tools" id="regionTools" hidden>
+            <label for="regionLayerSelect">Select regions from (source layer)</label>
+            <select id="regionLayerSelect" aria-label="Layer to split"></select>
+            <button class="btn btn-ghost btn-sm" id="selectColorRegions" type="button">Select regions on image</button>
+            <label for="regionDestinationSelect">Move selection to</label>
+            <select id="regionDestinationSelect" aria-label="Destination layer"><option value="">New layer</option></select>
+            <input id="splitLayerName" aria-label="New layer name" value="Highlights" maxlength="80">
+            <button class="btn btn-ghost btn-sm" id="splitColorRegions" type="button" disabled>Move selected regions to new layer</button>
+            <button class="btn btn-ghost btn-sm" id="clearColorRegions" type="button">Clear selection</button>
+            <p id="regionSelectionInfo">Select a layer, then click separate regions such as eye and hair highlights. The new layer keeps the same colour and can be moved higher.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Relief dimensions</h3>
+          <div class="field">
+            <label class="field-label" for="colorWidth"><span>Model width</span><span class="field-value"><input type="number" id="colorWidth" value="80" min="10" max="300" step="1"> mm</span></label>
+            <p class="field-help" id="colorHeightReadout">Height will preserve the image aspect ratio.</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="colorBase"><span>Base thickness</span><span class="field-value"><input type="number" id="colorBase" value="0.4" min="0.1" max="10" step="0.1"> mm</span></label>
+          </div>
+          <div class="field">
+            <label class="field-label" for="colorIncrement"><span>Height increment</span><span class="field-value"><input type="number" id="colorIncrement" value="0.2" min="0.05" max="5" step="0.05"> mm</span></label>
+          </div>
+          <details class="advanced">
+            <summary>Advanced · layer heights &amp; cleanup</summary>
+            <div class="field">
+              <p class="field-help">Layer height is the thickness added by that layer, not its final Z. Blank uses Height increment. Heights follow layers when reordered; base thickness is set above.</p>
+              <div id="colorLayerHeights"></div>
+              <button class="btn btn-ghost btn-sm" id="colorResetHeights" type="button">Use uniform heights</button>
+            </div>
+            <div class="field">
+              <label class="field-label" for="colorCleanup"><span>Remove islands smaller than</span><span class="field-value"><input type="number" id="colorCleanup" value="0" min="0" max="1000" step="1"> px</span></label>
+              <p class="field-help">0 keeps every detected region. Use a small value only to remove isolated noise.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="colorSlicerLayer"><span>Expected slicer layer height</span><span class="field-value"><input type="number" id="colorSlicerLayer" value="0.2" min="0.05" max="1" step="0.05"> mm</span></label>
+            </div>
+          </details>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">Hole &amp; tab</h3>
+          <label><input type="checkbox" id="colorHoleEnabled"> Add a hole / hanging tab</label>
+          <div class="field"><label class="field-label" for="colorHoleDiameter">Hole diameter <span class="field-value"><input id="colorHoleDiameter" type="number" min="0.5" max="30" step="0.5" value="4"> mm</span></label></div>
+          <div class="field"><label class="field-label" for="colorHoleHeight">Hole / tab height <span class="field-value"><input id="colorHoleHeight" type="number" min="0.1" max="30" step="0.1" placeholder="Base"> mm</span></label><p class="field-help">Blank follows base thickness. Set a larger height for a thicker external hanging tab; artwork heights stay unchanged.</p></div>
+          <div class="field"><label class="field-label" for="colorHoleX">Position X <span class="field-value"><input id="colorHoleX" type="number" step="0.1" value="0"> mm</span></label></div>
+          <div class="field"><label class="field-label" for="colorHoleY">Position Y <span class="field-value"><input id="colorHoleY" type="number" step="0.1" value="0"> mm</span></label></div>
+          <button class="btn btn-ghost btn-sm" id="colorHoleAuto" type="button">Place above artwork</button>
+          <button class="btn btn-ghost btn-sm" id="colorHolePlace" type="button">Place hole on preview</button>
+          <p class="field-help">Adds a tab with a 2 mm wall and a through-hole at your chosen tab height. Artwork above the base is never cut; place the hole outside the artwork for a keyring.</p>
+        </section>
+        <section class="card color-plan-card" id="colorPlanCard" hidden>
+          <h3 class="card-title">Relief &amp; print plan</h3>
+          <div class="color-height-map" id="colorHeightMap"></div>
+          <p class="color-plan-note" id="colorPlanNote"></p>
+        </section>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="colorGenerateBtn" type="button">Generate Color STL</button>
+          <button class="btn btn-ghost" id="colorDownloadBtn" type="button" disabled>Download STL</button>
+        </div>
+        <div class="status" id="colorStatus" role="status" aria-live="polite"></div>
+      </aside>
+
+      <section class="stage color-stage">
+        <div class="stage-main">
+          <div class="editor-head color-editor-head">
+            <div class="layer-panel color-layer-panel" id="colorLayerPanel" role="group" aria-label="Color masks"></div>
+            <div class="orig-thumb color-orig-thumb" id="colorOrigThumb" hidden><img id="colorOriginalImg" alt="Original colour illustration" draggable="false"></div>
+            <div class="stage-meta" id="colorStageMeta">No image selected</div>
+          </div>
+          <div class="color-canvas-wrap" id="colorCanvasWrap">
+            <canvas id="colorCanvas" draggable="false"></canvas>
+            <div class="canvas-hint" id="colorPreviewHint">printed layer preview · includes every higher region</div>
+            <div class="empty" id="colorMaskEmpty">Upload an illustration to preview its colour masks</div>
+          </div>
+          <div class="editor-bottom">
+            <select id="colorPreviewMode" aria-label="Preview mode"><option value="print" selected>Printed layer</option><option value="regions">Surface regions</option></select>
+            <select id="printLayerSelect" aria-label="Printed layer to inspect"></select>
+            <span class="hole-pos muted" id="colorFeatureNote">—</span>
+            <span class="spacer"></span>
+            <button class="ebtn" id="colorZoomFit" type="button">Fit</button>
+          </div>
+          <div class="viewport color-viewport" id="colorViewport">
+            <canvas id="colorThreeCanvas" draggable="false"></canvas>
+            <div class="vp-empty" id="colorVpEmpty">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M3 7l9 5 9-5M12 12v10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+              <p>Your stepped 3D preview appears here</p><p class="vp-empty-hint">Rotate · zoom · pan</p>
+            </div>
+            <button class="vp-reset" id="colorResetView" type="button" hidden>Reset view</button>
+            <div class="vp-info" id="colorVpInfo" hidden></div>
+          </div>
         </div>
       </section>
     </div>

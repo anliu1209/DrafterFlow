@@ -64,6 +64,19 @@ python3 -m venv .venv
 只负责把请求转发到现有的 `image_processing → vectorize → model_builder` 管道，管道本身不改。
 以后迁移到网页托管时，把 `server.py` 换成线上服务即可，管道与前端无需改动。
 
+## Color Layer Mode
+
+Color Layer Mode 与原有 Line Mode 独立：上传 PNG/JPG/WEBP 插画，选择 2–6 个颜色，
+按从低到高的顺序排列打印层并生成 STL。可去除边缘连通背景、将同色的独立区域拆为不同高度层，
+并在 Printed layer 预览查看该高度实际打印的区域（包含所有更高层的支撑）。
+
+Advanced 中可为每层指定增加的厚度（mm）；留空沿用统一 Height increment，顶面高度为
+底板厚度加上截至该层的厚度总和。Hole & tab 可设置孔径、位置及独立挂耳厚度；图案浮雕不被切穿。
+STL 仅包含几何，需在切片器中按打印计划设置换料。草稿仅存于当前浏览器；此版本不提供账号、
+云端项目、分享或社区功能。
+
+测试：`python -m unittest discover -s tests -v`。
+
 ## 部署 / Deploy
 
 整个应用已容器化（`Dockerfile`），同一份镜像既可跑在免费 PaaS 上，也可原样跑在自己的
