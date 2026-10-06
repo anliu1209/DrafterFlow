@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DrafterFlow · Turn your drawings into physical objects</title>
 <meta name="description" content="DrafterFlow turns 2D drawings and line art into manufacturable 3D relief models you can 3D print without CAD experience.">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=compact-gallery-2">
+<link rel="stylesheet" href="/static/workspace.css?v=chibi-tags-3">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js", "three/addons/": "/static/vendor/" } }
+</script>
 </head>
 <body>
 
@@ -18,9 +22,10 @@
     <span class="brand-name">DrafterFlow</span>
   </a>
   <nav class="site-nav">
+    <a href="#forge">Create</a>
+    <a href="#community">Community</a>
+    <a href="#projects" id="projectsNav" hidden>My Projects</a>
     <a href="#how" data-i18n="nav_how">How it works</a>
-    <a href="#use" data-i18n="nav_use">What you can make</a>
-    <a href="#gallery" data-i18n="nav_gallery">Gallery</a>
     <a href="#about" data-i18n="nav_about">About</a>
   </nav>
   <div class="header-actions">
@@ -29,17 +34,24 @@
       <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
     </button>
-    <a class="btn btn-primary" href="#forge" data-i18n="cta_create">Create a 3D model</a>
+    <button class="btn btn-ghost" id="signInBtn" type="button">Sign in</button>
+    <button class="account-button" id="accountButton" type="button" hidden></button>
+    <button class="btn btn-primary" id="headerCreate" type="button">Start creating</button>
   </div>
 </header>
+
+<section class="shared-view" id="sharedView" hidden aria-live="polite">
+  <a class="brand shared-back" href="/"><span class="brand-name">DrafterFlow</span></a>
+  <div class="shared-card" id="sharedCard"></div>
+</section>
 
 <main>
 
   <!-- ============ HERO ============ -->
   <section class="hero" id="top">
     <p class="eyebrow" data-i18n="hero_eyebrow">A drawing, made physical.</p>
-    <h1 class="hero-title" data-i18n="hero_title">Turn your drawings into physical objects.</h1>
-    <p class="hero-sub" data-i18n="hero_sub">DrafterFlow turns 2D drawings into 3D-printable objects. No CAD experience required.</p>
+    <h1 class="hero-title" data-i18n="hero_title">From drawing to something real.</h1>
+    <p class="hero-sub" data-i18n="hero_sub">Turn illustrations, artwork and designs into printable layered models — without CAD.</p>
     <div class="hero-cta">
       <a class="btn btn-primary btn-lg" href="#forge" data-i18n="cta_create">Create a 3D model</a>
       <a class="btn btn-ghost btn-lg" href="#how" data-i18n="cta_how">How it works</a>
@@ -47,33 +59,38 @@
 
     <div class="hero-visual">
       <div class="hv-card">
-        <span class="hv-label" data-i18n="hv_drawing">Your drawing</span>
-        <div class="hv-frame checker"><img id="heroOriginal" alt="Example drawing" draggable="false"></div>
+        <span class="hv-label" data-i18n="hv_drawing">Chef artwork</span>
+        <div class="hv-frame checker"><img id="heroOriginal" src="/static/examples/chef.png" alt="Original five-color chef artwork" draggable="false"></div>
       </div>
       <div class="hv-card">
-        <span class="hv-label" data-i18n="hv_layers">Detected layers</span>
-        <div class="hv-frame checker"><img id="heroLayers" alt="Detected base and relief layers" draggable="false"></div>
+        <span class="hv-label" data-i18n="hv_layers">Generated model</span>
+        <div class="hv-frame"><img id="heroLayers" src="/static/examples/chef-model.jpg?v=studio-light" alt="Chef model captured from DrafterFlow's 3D preview" draggable="false"></div>
       </div>
       <div class="hv-card hv-card--solid">
-        <span class="hv-label" data-i18n="hv_printable">Printable relief</span>
-        <div class="hv-chip">
-          <div class="hv-chip-stack">
-            <span class="hv-chip-bar hv-chip-bar--base"></span>
-            <span class="hv-chip-bar hv-chip-bar--relief"></span>
-          </div>
-          <div class="hv-chip-meta">
-            <span data-i18n="hv_base">4 mm base</span>
-            <span data-i18n="hv_relief">2 mm relief</span>
-          </div>
-        </div>
-        <p class="hv-note" data-i18n="hv_note">One STL, one filament swap.</p>
+        <span class="hv-label" data-i18n="hv_printable">Actual print</span>
+        <div class="hv-frame"><img src="/static/examples/chef-print.png" alt="User-provided photo of the printed chef charm" draggable="false"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ============ PRODUCT STORY ============ -->
+  <section class="section story" id="how">
+    <div class="section-head">
+      <p class="eyebrow">From sketch to shelf</p>
+      <h2 class="section-title">A short path from image to object.</h2>
+      <p class="section-sub">DrafterFlow keeps the creative part simple and makes the printable geometry visible at every step.</p>
+    </div>
+    <div class="story-grid">
+      <article class="story-step"><span class="story-index">01</span><div class="story-art story-art--upload"><span>PNG</span><i></i></div><h3>Upload your image</h3><p>Start with line art, a logo, or a flat-colour illustration.</p></article>
+      <article class="story-step"><span class="story-index">02</span><div class="story-art story-art--layers"><i></i><i></i><i></i></div><h3>Organize layers</h3><p>Separate regions, set their heights and decide what goes on top.</p></article>
+      <article class="story-step"><span class="story-index">03</span><div class="story-art story-art--controls"><i></i><i></i><i></i></div><h3>Generate a model</h3><p>Inspect the print plan and stepped 3D result. Revise whenever you need.</p></article>
+      <article class="story-step"><span class="story-index">04</span><div class="story-art story-art--print"><div></div><span>print-ready</span></div><h3>Print it. Hold it.</h3><p>Export your STL, prepare filament changes in your slicer, and make it real.</p></article>
     </div>
   </section>
 
   <!-- ============ FORGE (the tool) ============ -->
   <section class="forge" id="forge">
-    <div class="forge-head">
+    <div class="forge-head" hidden>
       <div>
         <h2 class="forge-title" data-i18n="forge_title">Create your model</h2>
         <p class="forge-sub" data-i18n="forge_sub">Upload a drawing with a transparent background and dark line work.</p>
@@ -81,24 +98,38 @@
       <p class="forge-note" data-i18n="forge_note">No CAD experience required.</p>
     </div>
 
-    <div class="mode-switch" role="tablist" aria-label="Model mode">
+    <div class="project-toolbar" id="projectToolbar">
+      <span class="ws-studio-label">Layer studio</span>
+      <div class="project-title-wrap"><label for="projectTitle" class="visually-hidden">Project</label><input id="projectTitle" type="text" maxlength="80" value="Untitled project" aria-label="Project title"></div>
+      <span class="save-state" id="saveState">Guest draft saved locally</span>
+      <details class="ws-project-menu"><summary>Project actions</summary><div class="project-actions">
+        <button class="btn btn-ghost btn-sm" id="saveProjectBtn" type="button">Save</button>
+        <button class="btn btn-ghost btn-sm" id="shareProjectBtn" type="button">Share</button>
+        <button class="btn btn-primary btn-sm" id="publishProjectBtn" type="button">Publish</button>
+      </div></details>
+    </div>
+
+    <div id="editorWorkspace" class="editor-workspace" role="region" aria-label="Physical-layer editor"></div>
+    <noscript><p>This editor needs JavaScript to analyze artwork and generate models.</p></noscript>
+
+    <div class="mode-switch" role="tablist" aria-label="Model mode" hidden>
       <button class="mode-tab is-active" id="lineModeTab" type="button" role="tab" aria-selected="true">Line Mode</button>
       <button class="mode-tab" id="colorModeTab" type="button" role="tab" aria-selected="false">Color Layer Mode</button>
     </div>
 
-    <div class="forge-grid" id="lineWorkbench">
+    <div class="forge-grid" id="lineWorkbench" hidden>
       <aside class="rail">
         <section class="card">
           <h3 class="card-title"><span data-i18n="card_drawing">Drawing</span></h3>
           <div class="dropzone" id="dropzone" role="button" tabindex="0">
-            <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg" hidden>
+            <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp" hidden>
             <div class="dz-inner">
               <svg class="dz-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 16V4m0 0L7 9m5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
               </svg>
               <p class="dz-main"><span data-i18n="drop_main">Drop your drawing here, or </span><span class="link" data-i18n="drop_choose">choose an image</span></p>
-              <p class="dz-hint" data-i18n="drop_hint">PNG · transparent background · dark line art</p>
+              <p class="dz-hint" data-i18n="drop_hint">PNG · JPG · WEBP · transparent background · dark line art</p>
             </div>
           </div>
           <div class="examples" id="examples">
@@ -413,7 +444,7 @@
   </section>
 
   <!-- ============ HOW IT WORKS ============ -->
-  <section class="section" id="how">
+  <section class="section" id="pipeline">
     <div class="section-head">
       <p class="eyebrow" data-i18n="how_eyebrow">Under the hood</p>
       <h2 class="section-title" data-i18n="how_title">How it works</h2>
@@ -428,6 +459,24 @@
       <li class="pipe-step"><div><h4 data-i18n="how6_t">Printability check</h4><p data-i18n="how6_b">A keychain hole is placed clear of the artwork with a safe margin.</p></div></li>
       <li class="pipe-step"><div><h4 data-i18n="how7_t">STL export</h4><p data-i18n="how7_b">One two-layer STL ,  print with a single filament swap at the base height.</p></div></li>
     </ol>
+  </section>
+
+  <!-- ============ MY PROJECTS ============ -->
+  <section class="section project-area" id="projects" hidden>
+    <div class="section-head section-head--inline">
+      <div><p class="eyebrow">Your workspace</p><h2 class="section-title">My Projects</h2><p class="section-sub">Editable sources, not just exported files.</p></div>
+      <button class="btn btn-primary" id="newProjectBtn" type="button">+ New Project</button>
+    </div>
+    <div class="project-grid" id="projectGrid"></div>
+  </section>
+
+  <!-- ============ COMMUNITY ============ -->
+  <section class="section community" id="community">
+    <div class="section-head section-head--inline">
+      <div><p class="eyebrow">Made with DrafterFlow</p><h2 class="section-title">Community</h2><p class="section-sub">A small gallery of projects people are turning into physical things.</p></div>
+      <button class="btn btn-ghost" id="refreshCommunityBtn" type="button">Refresh</button>
+    </div>
+    <div class="community-grid" id="communityGrid"><p class="empty-gallery">Loading community projects…</p></div>
   </section>
 
   <!-- ============ USE CASES ============ -->
@@ -454,24 +503,19 @@
     </div>
     <div class="gallery">
       <figure class="gallery-item">
-        <div class="gallery-frame checker"><img src="/api/examples/nametag" alt="Nametag" draggable="false"></div>
-        <figcaption><span data-i18n="gal1_name">Frame &amp; text</span> <span class="gallery-type" data-i18n="gal1_type">line art · relief on base</span></figcaption>
-        <button class="btn btn-ghost btn-sm" data-example="nametag" data-i18n="gallery_try">Try it</button>
+        <div class="gallery-frame checker"><img src="/static/examples/chef.png" alt="Chef artwork" draggable="false"></div>
+        <figcaption><span data-i18n="gal1_name">Chef</span> <span class="gallery-type" data-i18n="gal1_type">five-color layered charm</span></figcaption>
+        <button class="btn btn-ghost btn-sm" data-example="chef" data-i18n="gallery_try">Try it</button>
       </figure>
       <figure class="gallery-item">
-        <div class="gallery-frame checker"><img src="/api/examples/heart" alt="Heart" draggable="false"></div>
-        <figcaption><span data-i18n="gal2_name">Heart</span> <span class="gallery-type" data-i18n="gal2_type">solid silhouette</span></figcaption>
-        <button class="btn btn-ghost btn-sm" data-example="heart" data-i18n="gallery_try">Try it &rarr;</button>
-      </figure>
-      <figure class="gallery-item">
-        <div class="gallery-frame checker"><img src="/api/examples/qban" alt="Line art" draggable="false"></div>
-        <figcaption><span data-i18n="gal3_name">Line art</span> <span class="gallery-type" data-i18n="gal3_type">dense contours</span></figcaption>
+        <div class="gallery-frame gallery-frame--chibi checker"><img src="/api/examples/qban" alt="Hanging Chibi Keychain" draggable="false"></div>
+        <figcaption><span data-i18n="gal3_name">Hanging Chibi Keychain</span> <span class="gallery-type" data-i18n="gal3_type">line-art keychain</span></figcaption>
         <button class="btn btn-ghost btn-sm" data-example="qban" data-i18n="gallery_try">Try it &rarr;</button>
       </figure>
       <figure class="gallery-item gallery-item--placeholder">
         <div class="gallery-frame gallery-frame--empty" data-i18n="gallery_ph">Your drawing here</div>
         <figcaption data-i18n="gallery_ph_cap">Community submissions ,  coming soon</figcaption>
-        <button class="btn btn-ghost btn-sm" data-example="nametag" data-i18n="gallery_ph_btn">Start with an example</button>
+        <button class="btn btn-ghost btn-sm" data-example="chef" data-i18n="gallery_ph_btn">Start with an example</button>
       </figure>
     </div>
   </section>
@@ -510,6 +554,36 @@
   </div>
 </div>
 
-<script type="module" src="/static/app.js"></script>
+<div class="modal" id="authModal" hidden>
+  <div class="modal-backdrop" data-close-auth></div>
+  <form class="modal-card auth-card" id="authForm" aria-labelledby="authTitle">
+    <p class="eyebrow" id="authKicker">Save your work</p>
+    <h3 class="modal-title" id="authTitle">Sign in to DrafterFlow</h3>
+    <p class="modal-body" id="authBody">Your current guest project stays right here and will be saved after you sign in.</p>
+    <label class="auth-name" id="authNameWrap">Name<input id="authName" type="text" maxlength="48" autocomplete="name" placeholder="Maker name"></label>
+    <label>Email<input id="authEmail" type="email" required autocomplete="email" placeholder="you@example.com"></label>
+    <label>Password<input id="authPassword" type="password" required minlength="8" autocomplete="current-password" placeholder="At least 8 characters"></label>
+    <p class="auth-error" id="authError" role="alert"></p>
+    <div class="modal-actions"><button class="btn btn-primary" id="authSubmit" type="submit">Sign in</button><button class="btn btn-ghost" id="authSwitch" type="button">Create an account</button></div>
+  </form>
+</div>
+
+<div class="modal" id="publishModal" hidden>
+  <div class="modal-backdrop" data-close-publish></div>
+  <form class="modal-card publish-card" id="publishForm" aria-labelledby="publishTitle">
+    <p class="eyebrow">Community</p><h3 class="modal-title" id="publishTitle">Publish to Community</h3>
+    <p class="modal-body">Your project remains editable in My Projects. You can unpublish it later without deleting it.</p>
+    <label>Title<input id="publishTitleInput" type="text" maxlength="80" required></label>
+    <label>Description<textarea id="publishDescription" maxlength="600" placeholder="What did you make?"></textarea></label>
+    <label>Tags<input id="publishTags" type="text" maxlength="180" placeholder="#keychain #fanart #illustration" aria-describedby="publishTagsHelp"></label>
+    <p id="publishTagsHelp" class="community-meta">Separate tags with #, e.g. #keychain #fanart. Use hyphens for multiple words. Up to 8 tags.</p>
+    <div id="publishTagsPreview" class="tag-list" aria-label="Tag preview"></div>
+    <label class="check-label"><input id="publishAllowRemix" type="checkbox" checked> Allow others to Remix this project</label>
+    <p class="auth-error" id="publishError" role="alert"></p>
+    <div class="modal-actions"><button class="btn btn-primary" id="publishSubmit" type="submit">Publish</button><button class="btn btn-ghost" id="publishCancel" type="button">Cancel</button></div>
+  </form>
+</div>
+
+<script type="module" src="/static/app.js?v=chibi-tags-3"></script>
 </body>
 </html>

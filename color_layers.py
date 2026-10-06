@@ -180,8 +180,6 @@ def _assign_masks(lab: np.ndarray, visible: np.ndarray, palette: list[tuple[str,
     """Assign each visible pixel to its nearest supplied Lab centre."""
     centers = np.array([entry[1] for entry in palette], dtype=np.float32)
     points = lab.reshape(-1, 3)
-    # Bound temporary distance arrays on the production service. Keep every
-    # original pixel and the exact same nearest-centre assignment.
     labels = np.empty(len(points), dtype=np.int32)
     for start in range(0, len(points), 65536):
         chunk = points[start:start + 65536].astype(np.float32)

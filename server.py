@@ -14,6 +14,7 @@ import ctypes
 import gc
 import threading
 import hashlib
+import re
 import json
 import os
 import shutil
@@ -23,7 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response as FastAPIResponse, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -32,11 +33,15 @@ from export import export_stl
 from image_processing import ImageProcessingError, extract_masks
 from model_builder import ModelBuildError, build_color_layer_model, build_model, compute_default_hole
 from vectorize import base_polygons, color_polygons
+from project_store import (
+    StoreError, authenticate, create_session, create_share, create_user, delete_project,
+    delete_session, duplicate_project, get_community_project, get_owned_project,
+    get_shared_project, init_db, list_community, list_projects, publish_project,
+    remix_project, save_project, unpublish_project, user_for_session,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
-ASSET_REVISION = hashlib.sha256(
-    (BASE_DIR / 'static' / 'app.js').read_bytes() + (BASE_DIR / 'static' / 'style.css').read_bytes()
-).hexdigest()[:12]
+ASSET_REVISION = hashlib.sha256(b"".join(path.read_bytes() for path in sorted((BASE_DIR / "static").glob("*.js"))) + b"".join(path.read_bytes() for path in sorted((BASE_DIR / "static").glob("*.css")))).hexdigest()[:12]
 
 app = FastAPI(title="DrafterFlow")
 
@@ -56,6 +61,48 @@ def _release_color_scratch_memory():
     except AttributeError:
         pass  # malloc_trim is available on the production Linux host, not macOS.
 
+
+
+SESSION_COOKIE = "drafterflow_session"
+
+
+@app.on_event("startup")
+def _open_store():
+    """Create the local SQLite schema without altering the conversion pipeline."""
+    init_db()
+
+
+def _current_user(request: Request):
+    return user_for_session(request.cookies.get(SESSION_COOKIE))
+
+
+def _require_user(request: Request):
+    user = _current_user(request)
+    if user is None:
+        raise HTTPException(401, "Sign in to use this feature.")
+    return user
+
+
+def _require_account_storage():
+    # Never accept real registrations into Render's disposable container layer.
+    # Enable only after the operator attaches persistent storage and sets its path.
+    if os.environ.get("RENDER") == "true" and (
+        os.environ.get("DF_ACCOUNTS_ENABLED") != "1" or not os.environ.get("DF_DATABASE_PATH")
+    ):
+        raise HTTPException(503, "Account registration is waiting for persistent storage setup. Please try again later.")
+
+
+def _store_error(error: StoreError):
+    raise HTTPException(400, str(error)) from error
+
+
+def _set_session(response: FastAPIResponse, token: str) -> None:
+    # Local HTTP development deliberately stays usable; production can set
+    # DF_COOKIE_SECURE=1 behind HTTPS.
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30, httponly=True,
+        samesite="lax", secure=os.environ.get("DF_COOKIE_SECURE") == "1", path="/",
+    )
 
 # Preview colours: these are the two "filaments" shown in the UI (the light base
 # plate and the raised dark layer). The real print colour is chosen in the slicer.
@@ -200,6 +247,142 @@ def _parse_color_palette(value):
     if not isinstance(palette, list):
         raise HTTPException(422, "Color layer palette must be a list.")
     return palette
+
+
+# ---------- accounts and durable projects ----------
+# The editor APIs below intentionally sit beside, rather than inside, the image
+# pipeline. Guests can continue calling /api/analyze and /api/generate with no
+# credential at all; persistence/social actions are the only protected routes.
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    return {"user": _current_user(request)}
+
+
+@app.post("/api/auth/signup")
+def auth_signup(payload: dict, response: FastAPIResponse):
+    _require_account_storage()
+    try:
+        user = create_user(payload.get("email", ""), payload.get("password", ""), payload.get("name"))
+    except StoreError as error:
+        _store_error(error)
+    _set_session(response, create_session(user["id"]))
+    return {"user": user}
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict, response: FastAPIResponse):
+    user = authenticate(payload.get("email", ""), payload.get("password", ""))
+    if user is None:
+        raise HTTPException(401, "Email or password is incorrect.")
+    _set_session(response, create_session(user["id"]))
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request, response: FastAPIResponse):
+    delete_session(request.cookies.get(SESSION_COOKIE))
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/projects")
+def projects_index(request: Request):
+    return {"projects": list_projects(_require_user(request)["id"])}
+
+
+@app.post("/api/projects")
+def projects_create(payload: dict, request: Request):
+    try:
+        return {"project": save_project(_require_user(request)["id"], payload)}
+    except StoreError as error:
+        _store_error(error)
+
+
+@app.get("/api/projects/{project_id}")
+def projects_get(project_id: str, request: Request):
+    project = get_owned_project(_require_user(request)["id"], project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found.")
+    return {"project": project}
+
+
+@app.put("/api/projects/{project_id}")
+def projects_update(project_id: str, payload: dict, request: Request):
+    try:
+        return {"project": save_project(_require_user(request)["id"], payload, project_id)}
+    except StoreError as error:
+        _store_error(error)
+
+
+@app.delete("/api/projects/{project_id}")
+def projects_delete(project_id: str, request: Request):
+    if not delete_project(_require_user(request)["id"], project_id):
+        raise HTTPException(404, "Project not found.")
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/duplicate")
+def projects_duplicate(project_id: str, request: Request):
+    try:
+        return {"project": duplicate_project(_require_user(request)["id"], project_id)}
+    except StoreError as error:
+        _store_error(error)
+
+
+@app.post("/api/projects/{project_id}/share")
+def projects_share(project_id: str, request: Request):
+    try:
+        return {"share": create_share(_require_user(request)["id"], project_id)}
+    except StoreError as error:
+        _store_error(error)
+
+
+@app.post("/api/projects/{project_id}/publish")
+def projects_publish(project_id: str, payload: dict, request: Request):
+    try:
+        return {"submission": publish_project(_require_user(request)["id"], project_id, payload)}
+    except StoreError as error:
+        _store_error(error)
+
+
+@app.post("/api/projects/{project_id}/unpublish")
+def projects_unpublish(project_id: str, request: Request):
+    try:
+        unpublish_project(_require_user(request)["id"], project_id)
+    except StoreError as error:
+        _store_error(error)
+    return {"ok": True}
+
+
+@app.get("/api/shared/{code}")
+def shared_project(code: str):
+    project = get_shared_project(code)
+    if project is None:
+        raise HTTPException(404, "This share link is unavailable.")
+    return {"project": project}
+
+
+@app.get("/api/community")
+def community_index():
+    return {"projects": list_community()}
+
+
+@app.get("/api/community/{project_id}")
+def community_get(project_id: str):
+    project = get_community_project(project_id)
+    if project is None:
+        raise HTTPException(404, "Community project not found.")
+    return {"project": project}
+
+
+@app.post("/api/community/{project_id}/remix")
+@app.post("/api/projects/{project_id}/remix")
+def project_remix(project_id: str, request: Request):
+    try:
+        return {"project": remix_project(_require_user(request)["id"], project_id)}
+    except StoreError as error:
+        _store_error(error)
 
 
 @app.get("/api/examples")
@@ -522,10 +705,15 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 @app.get("/")
 def index():
-    html = (BASE_DIR / 'static' / 'index.html').read_text()
-    for asset in ('app.js', 'style.css'):
-        html = html.replace(f'/static/{asset}"', f'/static/{asset}?v={ASSET_REVISION}"')
-    return Response(html, media_type='text/html', headers={'Cache-Control': 'no-cache'})
+    html = (BASE_DIR / "static" / "index.html").read_text()
+    html = re.sub(r'(/static/(?:app\.js|style\.css|workspace\.css))(?:\?v=[^"]*)?"', lambda match: f'{match[1]}?v={ASSET_REVISION}"', html)
+    return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/s/{share_code}")
+def shared_page(share_code: str):
+    """The client renders a read-only share preview after fetching its code."""
+    return index()
 
 
 if __name__ == "__main__":

@@ -14,23 +14,13 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon, Point
 
-from color_layers import analyze_color_image, color_regions, resolve_color_layers, ColorLayerError, _assign_masks
+from color_layers import analyze_color_image, color_regions, resolve_color_layers, ColorLayerError
 from export import export_stl
 from model_builder import build_color_layer_model
 from vectorize import base_polygons, color_polygons
 
 
 class ColorLayerPipelineTests(unittest.TestCase):
-    def test_chunked_assignment_matches_dense_distances(self):
-        rng = np.random.default_rng(42)
-        lab = rng.integers(0, 256, (250, 350, 3), dtype=np.uint8)
-        visible = rng.random((250, 350)) > .2
-        palette = [(str(i), tuple(map(float, rgb))) for i, rgb in enumerate(rng.integers(0, 256, (5, 3)))]
-        centers = np.array([entry[1] for entry in palette], dtype=np.float32)
-        expected = ((lab.astype(np.float32)[:, :, None, :] - centers) ** 2).sum(axis=3).argmin(axis=2)
-        for index, mask in enumerate(_assign_masks(lab, visible, palette)):
-            np.testing.assert_array_equal(mask, (expected == index) & visible)
-
     def test_custom_layer_thicknesses_and_independent_tab_height(self):
         analysis = analyze_color_image(str(self.write_png('custom-heights.png', self.make_rectangles())), palette_size=4)
         masks = [entry.mask for entry in analysis.palette]

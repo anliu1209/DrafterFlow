@@ -10,4 +10,12 @@ services:
     environment:
       - PORT=8000
       - DF_HOST=0.0.0.0
+      - DF_DATABASE_PATH=/app/data/drafterflow.db
+      # Set to 1 only when HTTPS terminates at this container/proxy.
+      - DF_COOKIE_SECURE=0
+    volumes:
+      - drafterflow-data:/app/data
     restart: unless-stopped
+
+volumes:
+  drafterflow-data:

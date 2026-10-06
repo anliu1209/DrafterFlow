@@ -3,6 +3,7 @@
 
 # generated output
 output/
+data/
 
 # python caches
 __pycache__/
