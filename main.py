@@ -13,7 +13,7 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description="Convert a transparent or white-background image into a two-layer printable keychain STL."
     )
-    p.add_argument("input", help="input image (PNG/JPG; transparent or white background)")
+    p.add_argument("input", help="input image (PNG/JPG/WEBP; transparent or white background)")
     p.add_argument("output", help="output .stl path")
     p.add_argument("--width", type=float, default=50.0, help="max model width in mm (default: 50)")
     p.add_argument("--base", type=float, default=4.0, help="base thickness in mm (default: 4)")

@@ -1,10 +1,22 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/STLLoader.js';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
+import { createWorkspace } from './workspace.js';
+import { ModelLifecycle } from './model-state.js';
+import { parseTags, formatTags } from './tag-utils.js';
 
 const $ = (sel) => document.querySelector(sel);
 const num = (el) => { const v = parseFloat(el.value); return isNaN(v) ? 0 : v; };
 const int = (el) => { const v = parseInt(el.value, 10); return isNaN(v) ? 0 : v; };
+let workspace = null;
+const colorModelState = new ModelLifecycle(), lineModelState = new ModelLifecycle();
+let colorAnalyzing = false, colorAnalysisRequest = 0;
+let selectedPhysicalLayerId = null;
+
+function markLineDirty(reset = false) {
+  if (reset) workspace?.resetModel(lineModelState);
+  lineModelState.invalidate(reset); $('#downloadBtn').disabled = true; workspace?.refresh();
+}
 
 // ---------- state ----------
 let sourceFile = null;      // File / Blob currently in use
@@ -29,12 +41,21 @@ let pendingSource = null;        // {file, name} awaiting "switch image?" confir
 let renderer, scene, camera, controls, modelGroup, grid;
 let baseMat = null, topMat = null, baseMesh = null, topMesh = null;
 
+function addStudioLighting(targetRenderer, targetScene) {
+  // Keep pastel pigment colours faithful; filmic mapping made whites grey.
+  targetRenderer.toneMapping = THREE.NoToneMapping;
+  targetScene.add(new THREE.HemisphereLight(0xffffff, 0xffffff, 1.5));
+  const key = new THREE.DirectionalLight(0xffffff, 1.6);
+  key.position.set(2, 3, 8); targetScene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+  fill.position.set(-5, 2, -4); targetScene.add(fill);
+}
+
 function initThree() {
   const canvas = $('#threeCanvas');
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
@@ -42,16 +63,10 @@ function initThree() {
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
 
-  // Crisper, less "airbrush" lighting: low ambient, strong key, weak fill.
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2830, 0.55));
-  const key = new THREE.DirectionalLight(0xffffff, 2.0);
-  key.position.set(5, 7, 6);
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.35);
-  fill.position.set(-5, 2, -4);
-  scene.add(fill);
+  addStudioLighting(renderer, scene);
 
-  grid = new THREE.GridHelper(8, 20, 0x3c3a49, 0x26252e);
+  grid = new THREE.GridHelper(8, 20, 0x96a0d1, 0x96a0d1);
+  grid.material.transparent = true; grid.material.opacity = 0.18;
   grid.visible = false;
   scene.add(grid);
 
@@ -66,6 +81,7 @@ function initThree() {
 function resize() {
   const vp = $('#viewport');
   const w = vp.clientWidth, h = vp.clientHeight;
+  if (!w || !h) return;
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -100,11 +116,13 @@ function makePartGeometry(flatArray) {
   return g;
 }
 
-function loadStl(blob, baseThickness) {
+function loadStl(blob, baseThickness, token = null) {
+  return new Promise((resolve, reject) => {
   const url = URL.createObjectURL(blob);
   const loader = new STLLoader();
   loader.load(url, (geometry) => {
     URL.revokeObjectURL(url);
+    if (token !== null && !lineModelState.accepts(token)) { geometry.dispose(); resolve(false); return; }
     geometry.computeBoundingBox();
     const box = geometry.boundingBox;
     const center = new THREE.Vector3();
@@ -158,8 +176,11 @@ function loadStl(blob, baseThickness) {
     $('#vpEmpty').hidden = true;
     $('#resetView').hidden = false;
     $('#vpInfo').hidden = false;
+    geometry.dispose(); resolve(true);
   }, undefined, (err) => {
     setStatus(t('stl_failed') + (err && err.message ? err.message : 'unknown error'), 'err');
+    URL.revokeObjectURL(url); reject(err);
+  });
   });
 }
 
@@ -174,6 +195,7 @@ function onColorChange() {
   if (rs) rs.style.background = colorHex();
   renderGauge();
   scheduleAnalyze();
+  scheduleProjectPersist();
 }
 
 // ---------- 2D editor canvas + tools + multi-hole ----------
@@ -332,9 +354,11 @@ function drawSelection(h) {
 
 function loadLayerPreview() {
   if (!analysis) { editorImg.src = ''; return; }
-  const src = layerState.base && layerState.relief ? analysis.combined_png
+  let src = layerState.base && layerState.relief ? analysis.combined_png
     : layerState.base ? analysis.base_png
     : layerState.relief ? analysis.color_png : null;
+  if (workspace?.preview === 'artwork') src = analysis.combined_png;
+  if (workspace?.preview === 'print') src = $('#layerRelief').classList.contains('is-selected') ? analysis.color_png : analysis.base_png;
   if (!src) { editorImg.src = ''; renderCanvas(); return; }
   editorImg.onload = () => renderCanvas();
   editorImg.src = src;
@@ -343,6 +367,7 @@ function loadLayerPreview() {
 function fitCanvas() {
   if (!analysis) return;
   const wrap = $('#canvasWrap');
+  if (!wrap.clientWidth || !wrap.clientHeight) return;
   const W = Math.max(1, wrap.clientWidth), H = Math.max(1, wrap.clientHeight);
   canvas.width = W; canvas.height = H;
   const s = Math.min(W / analysis.w_px, H / analysis.h_px) * 0.93;
@@ -353,11 +378,13 @@ function fitCanvas() {
 }
 
 function recompute() {
+  markLineDirty();
   holes.forEach(h => { h.valid = holeValid(h); });
   renderHoleList();
   renderCanvas();
   updateHoleMessage();
   updateHolePos();
+  scheduleProjectPersist();
 }
 
 function updateHolePos() {
@@ -636,13 +663,13 @@ const I18N = {
     nav_how: 'How it works', nav_use: 'What you can make', nav_gallery: 'Gallery', nav_about: 'About',
     cta_create: 'Create a 3D model', cta_how: 'How it works',
     hero_eyebrow: 'A drawing, made physical.',
-    hero_title: 'Turn your drawings into physical objects.',
-    hero_sub: 'DrafterFlow turns 2D drawings into 3D-printable objects. No CAD experience required.',
-    hv_drawing: 'Your drawing', hv_layers: 'Detected layers', hv_printable: 'Printable relief',
+    hero_title: 'From drawing to something real.',
+    hero_sub: 'Turn illustrations, artwork and designs into printable layered models — without CAD.',
+    hv_drawing: 'Chef artwork', hv_layers: 'Generated model', hv_printable: 'Actual print',
     hv_base: '4 mm base', hv_relief: '2 mm relief', hv_note: 'One STL, one filament swap.',
     forge_title: 'Create your model', forge_sub: 'Upload a drawing with a transparent background and dark line work.', forge_note: 'No 3D modeling experience required.',
     card_drawing: 'Drawing', card_dims: 'Dimensions', card_colors: 'Colors', card_section: 'Cross-section',
-    drop_main: 'Drop your drawing here, or ', drop_choose: 'choose an image', drop_hint: 'PNG · transparent background · dark line art',
+    drop_main: 'Drop your drawing here, or ', drop_choose: 'choose an image', drop_hint: 'PNG · JPG · WEBP · transparent background · dark line art',
     examples_label: 'Examples', example_nametag: 'Nametag', example_heart: 'Heart', example_qban: 'Line art',
     dim_width: 'Model width', dim_base: 'Base thickness', dim_relief: 'Relief thickness', dim_hole: 'Keychain hole',
     chip_light: 'light', chip_dark: 'dark',
@@ -677,9 +704,9 @@ const I18N = {
     use4_t: 'Prototyping', use4_b: 'Turn simple sketches into quick physical prototypes.',
     use5_t: 'Fan art', use5_b: 'Turn your favorite designs into physical keepsakes.',
     gallery_eyebrow: 'Examples', gallery_title: 'Made with DrafterFlow', gallery_sub: 'A few outputs from the pipeline. Load one into the tool and see how it was built.',
-    gal1_name: 'Frame & text', gal1_type: 'line art · relief on base',
+    gal1_name: 'Chef', gal1_type: 'five-color layered charm',
     gal2_name: 'Heart', gal2_type: 'solid silhouette',
-    gal3_name: 'Line art', gal3_type: 'dense contours',
+    gal3_name: 'Hanging Chibi Keychain', gal3_type: 'line-art keychain',
     gallery_try: 'Try it', gallery_ph: 'Your drawing here', gallery_ph_cap: 'Community submissions, coming soon', gallery_ph_btn: 'Start with an example',
     about_eyebrow: 'Why it exists', about_title: 'About',
     about_1: 'I drew a chibi of Heeseung and wanted it as a real 3D-printed keychain. Tracing the line art by hand in Onshape took hours and wouldn’t scale to the next drawing, so I built DrafterFlow to do it instead.',
@@ -701,13 +728,13 @@ const I18N = {
     nav_how: '工作原理', nav_use: '应用场景', nav_gallery: '示例', nav_about: '关于',
     cta_create: '创建 3D 模型', cta_how: '工作原理',
     hero_eyebrow: '一张画，变成实物。',
-    hero_title: '把你的画变成实体物件。',
-    hero_sub: 'DrafterFlow 把 2D 线稿变成可 3D 打印的实体物件。无需任何三维建模经验。',
-    hv_drawing: '你的画', hv_layers: '识别出的分层', hv_printable: '可打印的浮雕',
+    hero_title: '让画作，成为手中的实物。',
+    hero_sub: '把插画、图案和设计转成可打印的分层模型，无需 CAD。',
+    hv_drawing: '厨师原图', hv_layers: '生成的模型', hv_printable: '实际打印',
     hv_base: '4 mm 底板', hv_relief: '2 mm 浮雕', hv_note: '一个 STL，一次换料。',
     forge_title: '创建你的模型', forge_sub: '上传一张透明背景、深色线稿的图片。', forge_note: '无需三维建模经验。',
     card_drawing: '图片', card_dims: '尺寸', card_colors: '颜色', card_section: '截面',
-    drop_main: '把画拖到这里，或 ', drop_choose: '选择图片', drop_hint: 'PNG · 透明背景 · 深色线稿',
+    drop_main: '把画拖到这里，或 ', drop_choose: '选择图片', drop_hint: 'PNG · JPG · WEBP · 透明背景 · 深色线稿',
     examples_label: '示例', example_nametag: '名牌', example_heart: '爱心', example_qban: '线稿',
     dim_width: '模型宽度', dim_base: '底板厚度', dim_relief: '浮雕厚度', dim_hole: '钥匙孔直径',
     chip_light: '浅色', chip_dark: '深色',
@@ -742,9 +769,9 @@ const I18N = {
     use4_t: '原型', use4_b: '把简单草图变成快速实体原型。',
     use5_t: '同人周边', use5_b: '把你喜欢的设计变成实体收藏。',
     gallery_eyebrow: '示例', gallery_title: '用 DrafterFlow 做的', gallery_sub: '流水线的一些输出。载入一个到工具里看看它是怎么生成的。',
-    gal1_name: '边框与文字', gal1_type: '线稿 · 底板上的浮雕',
+    gal1_name: '厨师', gal1_type: '五色分层挂件',
     gal2_name: '爱心', gal2_type: '实心轮廓',
-    gal3_name: '线稿', gal3_type: '密集轮廓',
+    gal3_name: 'Hanging Chibi Keychain', gal3_type: '线稿挂件',
     gallery_try: '试一试', gallery_ph: '把你的画放这里', gallery_ph_cap: '社区投稿，即将上线', gallery_ph_btn: '从示例开始',
     about_eyebrow: '它为什么存在', about_title: '关于',
     about_1: '我画了一张李羲承（Heeseung）的 Q 版图，想把它做成真正的 3D 打印钥匙扣。在 Onshape 里手动描线太耗时、也不好扩展，于是我做了 DrafterFlow。',
@@ -845,6 +872,7 @@ async function analyze() {
 }
 
 async function generate() {
+  if (lineModelState.generating) return false;
   if (!sourceFile) { setStatus(t('upload_first'), 'err'); return false; }
   const fd = new FormData();
   fd.append('file', sourceFile, 'upload.png');
@@ -860,6 +888,7 @@ async function generate() {
   startPipeline();
   const btn = $('#generateBtn');
   btn.disabled = true;
+  const token = lineModelState.begin(); workspace?.refresh();
   try {
     const res = await fetch('/api/generate', { method: 'POST', body: fd });
     if (!res.ok) {
@@ -870,13 +899,15 @@ async function generate() {
       return false;
     }
     const blob = await res.blob();
+    if (!lineModelState.accepts(token)) { setStatus('Settings changed during generation. Update Model to use your latest edits.'); return false; }
     stopPipeline();
     stlBlob = blob;
     committedSourceName = sourceName;
     const hc = res.headers.get('X-Hole-Center');
     holeCenter = hc ? hc.split(',').map(Number) : null;
 
-    loadStl(blob, num($('#base')));
+    if (!await loadStl(blob, num($('#base')), token)) return false;
+    lineModelState.complete(token); workspace?.generated(lineModelState);
     $('#downloadBtn').disabled = false;
 
     const total = num($('#base')) + num($('#color'));
@@ -896,13 +927,14 @@ async function generate() {
     setStatus(t('network_error') + e.message, 'err');
     return false;
   } finally {
+    lineModelState.finish(token); workspace?.refresh();
     stopPipeline();
     btn.disabled = false;
   }
 }
 
 function download() {
-  if (!stlBlob) return;
+  if (!stlBlob || !lineModelState.current) return;
   const base = (sourceName || 'keychain').replace(/\.[^.]+$/, '');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(stlBlob);
@@ -910,6 +942,7 @@ function download() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 // ---------- source selection ----------
@@ -944,6 +977,7 @@ async function generateThenSwitch() {
 }
 
 function syncOrigThumb() {
+  if (workspace) return;
   // Size the original-image square to the width of the Base/Relief layer panel so the
   // preview lines up with the two layer rows beside it. No-op until a source is loaded.
   const thumb = $('#origThumb');
@@ -955,6 +989,8 @@ function syncOrigThumb() {
 }
 
 function applySource(file, name) {
+  markLineDirty(true); stlBlob = null;
+  if (!isRestoringProject) viewingReadOnlyProject = false;
   if (sourceUrl) URL.revokeObjectURL(sourceUrl);
   sourceFile = file;
   sourceName = name;
@@ -973,7 +1009,8 @@ function applySource(file, name) {
   renderHoleList();
   updateHoleMessage();
   $('#stageMeta').textContent = name;
-  analyze();
+  rememberSource(file, 'line');
+  return analyze();
 }
 
 // ---------- modal ----------
@@ -996,27 +1033,18 @@ function hideModal() { $('#modal').hidden = true; }
 
 // ---------- hero + gallery ----------
 async function initHero() {
-  try {
-    const r = await fetch('/api/examples/nametag');
-    const blob = await r.blob();
-    const orig = $('#heroOriginal');
-    if (orig) orig.src = URL.createObjectURL(blob);
-    const fd = new FormData();
-    fd.append('file', blob, 'upload.png');
-    const ar = await fetch('/api/analyze', { method: 'POST', body: fd });
-    const data = await ar.json();
-    const layers = $('#heroLayers');
-    if (layers && data.ok) layers.src = data.combined_png;
-  } catch (_) { /* hero is decorative; ignore failures */ }
+  // Original artwork, an actual app screenshot, and the user's print photo
+  // are supplied directly in HTML instead of simulated decorative output.
 }
 
 function initGallery() {
   document.querySelectorAll('[data-example]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.example;
-      const r = await fetch('/api/examples/' + encodeURIComponent(id));
+      const r = await fetch(id === 'chef' ? '/static/examples/chef.png' : '/api/examples/' + encodeURIComponent(id));
       const blob = await r.blob();
-      setSource(blob, (t('example_' + id) || id) + '.png');
+      $('#colorPaletteSize').value = id === 'chef' ? '5' : '2'; setWorkbenchMode('color');
+      setColorSource(blob, (t('example_' + id) || id) + '.png');
       const forge = $('#forge');
       if (forge) forge.scrollIntoView({ behavior: 'smooth' });
     });
@@ -1030,7 +1058,7 @@ async function loadExamples() {
     const list = await res.json();
     const box = $('#examples');
     if (!list.length) return;
-    for (const ex of list) {
+    for (const ex of list.filter(example => example.id !== 'nametag')) {
       const label = t('example_' + ex.id) || ex.name;
       const b = el('button', 'example-btn');
       b.setAttribute('data-i18n', 'example_' + ex.id);
@@ -1038,7 +1066,8 @@ async function loadExamples() {
       b.addEventListener('click', async () => {
         const r = await fetch('/api/examples/' + encodeURIComponent(ex.id));
         const blob = await r.blob();
-        setSource(blob, label + '.png');
+        if (activeMode === 'line') setSource(blob, label + '.png');
+        else { $('#colorPaletteSize').value = '2'; setColorSource(blob, label + '.png'); }
       });
       box.appendChild(b);
     }
@@ -1100,6 +1129,969 @@ function initMotion() {
   }
 }
 
+// ---------- Color Layer Mode ----------
+// This is intentionally separate from the line-art editor above.  The two modes
+// share visual tokens and STL infrastructure, but their input semantics are quite
+// different: line mode extracts a silhouette + dark strokes, while color mode
+// presents non-semantic palette masks that the user orders explicitly.
+let activeMode = 'color';
+let colorSourceFile = null;
+let colorSourceUrl = null;
+let colorSourceName = '';
+let colorAnalysis = null;
+let colorPalette = []; // bottom -> top: { id, rgb, lab, mask_png, pixel_count, ignored, visible }
+let colorMaskImages = new Map();
+let colorMaskAlpha = new Map();
+let colorStlBlob = null;
+let backgroundCandidateId = null;
+let colorBackgroundRemoved = false;
+let colorPreviewMode = 'print', previewLayerId = null;
+let regionSelecting = false, regionTargetId = null;
+let selectedColorRegions = new Set();
+let colorRegionPixels = null, colorRegionOwners = new Map();
+let colorSelectionOverlay = null, colorPrintPreview = null;
+let colorCanvas, colorCtx;
+let colorView = { zoom: 1, ox: 0, oy: 0 };
+let colorHolePlacing = false;
+let colorRenderer, colorScene, colorCamera, colorControls, colorModelGroup, colorGrid;
+
+function setColorStatus(message, kind = '') {
+  const node = $('#colorStatus');
+  node.textContent = message;
+  node.className = 'status' + (kind ? ' ' + kind : '');
+  workspace?.refresh();
+  workspace?.refresh();
+}
+
+function setWorkbenchMode(mode) {
+  activeMode = mode;
+  if (workspace) {
+    $('#lineWorkbench').hidden = true; $('#colorWorkbench').hidden = true;
+    workspace.setEngine(); scheduleProjectPersist();
+    requestAnimationFrame(fitWorkspacePreview);
+    return;
+  }
+  const isColor = mode === 'color';
+  $('#lineWorkbench').hidden = isColor;
+  $('#colorWorkbench').hidden = !isColor;
+  $('#lineModeTab').classList.toggle('is-active', !isColor);
+  $('#colorModeTab').classList.toggle('is-active', isColor);
+  $('#lineModeTab').setAttribute('aria-selected', String(!isColor));
+  $('#colorModeTab').setAttribute('aria-selected', String(isColor));
+  const sub = document.querySelector('.forge-sub');
+  const note = document.querySelector('.forge-note');
+  if (isColor) {
+    sub.textContent = 'Upload a flat-colour illustration, inspect its masks, then choose the stepped relief order.';
+    note.textContent = 'Order printable layers; the same colour can appear at several heights.';
+    requestAnimationFrame(() => { resizeColorThree(); if (colorAnalysis) fitColorCanvas(); });
+  } else {
+    sub.textContent = t('forge_sub');
+    note.textContent = t('forge_note');
+  }
+  scheduleProjectPersist();
+}
+
+function colorActivePalette() {
+  return colorPalette.filter((entry) => !entry.ignored && entry.pixel_count > 0);
+}
+
+function colorDimensionValues() {
+  return {
+    width: Math.max(0, num($('#colorWidth'))),
+    base: Math.max(0, num($('#colorBase'))),
+    increment: Math.max(0, num($('#colorIncrement'))),
+    slicer: Math.max(0, num($('#colorSlicerLayer'))),
+  };
+}
+
+function invalidateColorStl(reset = false) {
+  if (reset) workspace?.resetModel(colorModelState);
+  colorModelState.invalidate(reset);
+  $('#colorDownloadBtn').disabled = true;
+  // Retain the last generated preview while editing. Only a new artwork clears it.
+  if (!reset) { workspace?.refresh(); return; }
+  colorStlBlob = null;
+  if (colorModelGroup) {
+    while (colorModelGroup.children.length) {
+      const part = colorModelGroup.children[0];
+      colorModelGroup.remove(part);
+      part.geometry.dispose(); part.material.dispose();
+    }
+  }
+  if (colorGrid) colorGrid.visible = false;
+  $('#colorVpEmpty').hidden = false;
+  $('#colorResetView').hidden = true;
+  $('#colorVpInfo').hidden = true;
+  workspace?.refresh();
+}
+
+function setColorSource(file, name, options = {}) {
+  if (!file) return;
+  if (file.type && !/^image\/(png|jpeg|webp)$/.test(file.type)) { setColorStatus('Choose a PNG, JPG or WEBP image.', 'err'); return; }
+  if (!isRestoringProject) viewingReadOnlyProject = false;
+  if (!isRestoringProject) { savedColorPalette = null; $('#colorHoleEnabled').checked = false; $('#colorHoleX').value = '0'; $('#colorHoleY').value = '0'; colorHolePlacing = false; }
+  if (colorSourceUrl) URL.revokeObjectURL(colorSourceUrl);
+  colorSourceFile = file;
+  colorSourceName = name || 'illustration';
+  colorSourceUrl = URL.createObjectURL(file);
+  colorAnalysis = null;
+  colorPalette = [];
+  backgroundCandidateId = null;
+  colorBackgroundRemoved = options.removeBackground === true;
+  colorMaskImages.clear();
+  colorMaskAlpha.clear();
+  colorRegionPixels = null; selectedColorRegions.clear(); regionSelecting = false;
+  previewLayerId = null; regionTargetId = null;
+  selectedPhysicalLayerId = null;
+  colorAnalysisRequest++;
+  invalidateColorStl(true);
+  $('#colorOriginalImg').src = colorSourceUrl;
+  $('#colorOrigThumb').hidden = false;
+  $('#colorStageMeta').textContent = colorSourceName;
+  $('#colorMaskEmpty').hidden = false;
+  $('#colorMaskEmpty').textContent = 'Analyzing flat colours…';
+  renderColorPalette();
+  rememberSource(file, 'color');
+  return analyzeColorLayers();
+}
+
+function imageFromSource(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+async function analyzeColorLayers(options = {}) {
+  if (!colorSourceFile) { setColorStatus('Upload a flat-colour illustration first.', 'err'); return; }
+  if (colorPalette.length && options.resetLayers !== true) savedColorPalette = serializablePalette();
+  const fd = new FormData();
+  fd.append('file', colorSourceFile, colorSourceName || 'illustration.png');
+  fd.append('palette_size', $('#colorPaletteSize').value);
+  fd.append('alpha_threshold', '8');
+  fd.append('cleanup_min_area', String(Math.max(0, int($('#colorCleanup')))));
+  fd.append('width', String(Math.max(1, num($('#colorWidth')))));
+  fd.append('remove_background', String(colorBackgroundRemoved));
+  if (options.preservePalette === true && colorPalette.length) {
+    fd.append('palette', JSON.stringify(colorAnalysis.palette));
+  }
+  const button = $('#colorAnalyzeBtn');
+  const request = ++colorAnalysisRequest;
+  colorAnalyzing = true;
+  invalidateColorStl();
+  button.disabled = true;
+  setColorStatus('Analyzing printable regions…');
+  try {
+    const response = await fetch('/api/color/analyze', { method: 'POST', body: fd });
+    const data = await response.json();
+    if (request !== colorAnalysisRequest) return false;
+    if (!response.ok || !data.ok) throw new Error(data.error || 'Color analysis failed.');
+    colorAnalysis = data;
+    invalidateColorStl();
+    colorBackgroundRemoved = data.background_removed === true;
+    colorPalette = data.palette.map((entry, index) => ({
+      ...entry,
+      name: `Layer ${index + 1}`,
+      source_color_id: entry.id, region_seeds: null, excluded_region_seeds: [],
+      // Cleanup may remove an entire sparse palette entry. Keep it inspectable
+      // rather than silently reordering the palette, but never give it a height.
+      ignored: entry.pixel_count === 0,
+      visible: entry.pixel_count > 0,
+    }));
+    chooseBackgroundCandidate();
+    colorMaskImages.clear();
+    colorMaskAlpha.clear();
+    const regionImage = await imageFromSource(data.region_map_png);
+    if (request !== colorAnalysisRequest) return false;
+    const regionCanvas = document.createElement('canvas'); regionCanvas.width = data.w_px; regionCanvas.height = data.h_px;
+    const regionContext = regionCanvas.getContext('2d', { willReadFrequently: true }); regionContext.drawImage(regionImage, 0, 0);
+    colorRegionPixels = regionContext.getImageData(0, 0, data.w_px, data.h_px).data;
+    applySavedColorPalette();
+    if (!colorPalette.some(entry => entry.id === selectedPhysicalLayerId)) selectedPhysicalLayerId = colorActivePalette()[0]?.id || null;
+    selectedColorRegions.clear(); colorSelectionOverlay = null;
+    rebuildColorLayerMasks();
+    $('#colorMaskEmpty').hidden = true;
+    $('#colorStageMeta').textContent = `${data.palette.length} model colours · ${data.w_px} × ${data.h_px} px`;
+    $('#colorStageMeta').title = `The source has ${data.source_color_count >= 999 ? '999+' : data.source_color_count} shades, including smooth edge pixels. These are reduced to the selected model colours.`;
+    renderColorPalette();
+    renderColorLayers();
+    updateColorMetrics();
+    fitColorCanvas();
+    setColorStatus(`${colorActivePalette().length} printable layers detected. Arrange higher layers at the top.`, 'ok');
+    scheduleProjectPersist();
+    return true;
+  } catch (error) {
+    if (request !== colorAnalysisRequest) return false;
+    $('#colorMaskEmpty').hidden = false;
+    $('#colorMaskEmpty').textContent = 'Unable to build colour masks';
+    setColorStatus(error.message || 'Color analysis failed.', 'err');
+    return false;
+  } finally {
+    if (request === colorAnalysisRequest) { colorAnalyzing = false; button.disabled = false; updateBackgroundTools(); workspace?.refresh(); }
+  }
+}
+
+function renderColorPalette() {
+  if (workspace) { updateBackgroundTools(); updateColorLayerControls(); workspace.refresh(); return; }
+  const list = $('#colorPaletteList');
+  list.innerHTML = '';
+  if (!colorPalette.length) {
+    const empty = el('p', 'palette-empty');
+    empty.textContent = colorSourceFile ? 'Analyzing palette…' : 'Upload a flat-colour illustration to detect its palette.';
+    list.appendChild(empty);
+    updateBackgroundTools();
+    return;
+  }
+  colorPalette.forEach((entry, index) => {
+    const row = el('div', 'palette-layer' + (entry.ignored ? ' is-ignored' : ''));
+    const swatch = el('span', 'palette-swatch');
+    swatch.style.background = entry.hex;
+    const name = el('span', 'palette-layer-name');
+    const label = document.createElement('input'); label.value = colorLayerName(entry, index);
+    label.setAttribute('aria-label', `Name of layer ${index + 1}`); label.maxLength = 80;
+    label.addEventListener('change', () => { entry.name = label.value.trim() || `Layer ${index + 1}`; renderColorLayers(); renderColorPlan(); updateColorLayerControls(); scheduleProjectPersist(); });
+    const pixels = document.createElement('span');
+    pixels.textContent = `${entry.pixel_count.toLocaleString()} px`;
+    name.append(label, pixels);
+    const use = el('button', 'palette-icon');
+    use.type = 'button';
+    use.title = entry.ignored ? 'Include this colour in the model' : 'Ignore this colour (for example, a flat background)';
+    use.textContent = entry.ignored ? 'Use' : 'Ignore';
+    use.disabled = entry.pixel_count === 0;
+    use.addEventListener('click', () => {
+      entry.ignored = !entry.ignored;
+      invalidateColorStl();
+      renderColorPalette(); renderColorLayers(); renderColorPlan(); renderColorCanvas();
+      scheduleProjectPersist();
+    });
+    const actions = el('span', 'palette-actions');
+    const up = el('button', 'palette-order');
+    up.type = 'button'; up.textContent = '↑'; up.title = 'Move lower'; up.disabled = index === 0;
+    up.addEventListener('click', () => moveColorLayer(index, -1));
+    const down = el('button', 'palette-order');
+    down.type = 'button'; down.textContent = '↓'; down.title = 'Move higher'; down.disabled = index === colorPalette.length - 1;
+    down.addEventListener('click', () => moveColorLayer(index, 1));
+    actions.append(up, down);
+    row.append(swatch, name, use, actions);
+    list.appendChild(row);
+  });
+  updateBackgroundTools();
+  updateColorLayerControls();
+}
+
+function colorLayerName(entry, index = colorPalette.indexOf(entry)) { return entry.name || `Layer ${index + 1}`; }
+function seedKey(seed) { return `${seed[0]}:${seed[1]}`; }
+
+function rebuildColorLayerMasks() {
+  if (!colorAnalysis || !colorRegionPixels) return;
+  const pixels = colorAnalysis.w_px * colorAnalysis.h_px;
+  const owners = new Int16Array((colorAnalysis.regions?.length || 0) + 1); owners.fill(-1);
+  colorRegionOwners.clear(); colorMaskImages.clear(); colorMaskAlpha.clear();
+  colorPalette.forEach((entry, index) => {
+    const allowed = entry.region_seeds == null ? null : new Set(entry.region_seeds.map(seedKey));
+    const excluded = new Set((entry.excluded_region_seeds || []).map(seedKey));
+    (colorAnalysis.regions || []).forEach((region) => {
+      if (region.color_id !== entry.source_color_id || (allowed && !allowed.has(seedKey(region.seed))) || excluded.has(seedKey(region.seed))) return;
+      owners[region.code] = index; colorRegionOwners.set(region.code, entry.id);
+    });
+    entry.pixel_count = 0;
+  });
+  const buffers = colorPalette.map(() => new Uint8ClampedArray(pixels * 4));
+  for (let pixel = 0; pixel < pixels; pixel++) {
+    const offset = pixel * 4;
+    const code = colorRegionPixels[offset] | (colorRegionPixels[offset + 1] << 8) | (colorRegionPixels[offset + 2] << 16);
+    const owner = code ? owners[code] : -1;
+    if (owner < 0) continue;
+    const entry = colorPalette[owner], data = buffers[owner];
+    data[offset] = entry.rgb[0]; data[offset + 1] = entry.rgb[1]; data[offset + 2] = entry.rgb[2]; data[offset + 3] = 255;
+    entry.pixel_count++;
+  }
+  colorPalette.forEach((entry, index) => {
+    const canvas = document.createElement('canvas'); canvas.width = colorAnalysis.w_px; canvas.height = colorAnalysis.h_px;
+    canvas.getContext('2d').putImageData(new ImageData(buffers[index], canvas.width, canvas.height), 0, 0);
+    entry.mask_png = canvas.toDataURL('image/png'); colorMaskImages.set(entry.id, canvas);
+  });
+  rebuildColorPrintPreview();
+}
+
+function updateColorLayerControls() {
+  renderColorLayerHeights();
+  $('#regionTools').hidden = !colorPalette.length;
+  const active = colorActivePalette();
+  if (!active.some(entry => entry.id === previewLayerId)) previewLayerId = active[0]?.id || null;
+  if (!active.some(entry => entry.id === regionTargetId)) regionTargetId = active[0]?.id || null;
+  for (const [selector, chosen] of [['#printLayerSelect', previewLayerId], ['#regionLayerSelect', regionTargetId]]) {
+    const control = $(selector); control.innerHTML = '';
+    active.forEach((entry) => { const option = document.createElement('option'); option.value = entry.id; option.textContent = colorLayerName(entry); control.appendChild(option); });
+    control.value = chosen || '';
+  }
+  $('#printLayerSelect').hidden = colorPreviewMode !== 'print';
+  $('#selectColorRegions').classList.toggle('is-active', regionSelecting);
+  $('#colorCanvas').classList.toggle('is-selecting', regionSelecting);
+  $('#splitColorRegions').disabled = !selectedColorRegions.size;
+  const destination = $('#regionDestinationSelect'), previousDestination = destination.value;
+  destination.innerHTML = '<option value="">New layer</option>';
+  const source = colorPalette.find(entry => entry.id === regionTargetId);
+  colorPalette.filter(entry => entry.id !== regionTargetId && entry.source_color_id === source?.source_color_id && !entry.ignored).forEach(entry => {
+    const option = document.createElement('option'); option.value = entry.id; option.textContent = colorLayerName(entry); destination.appendChild(option);
+  });
+  destination.value = [...destination.options].some(option => option.value === previousDestination) ? previousDestination : '';
+  $('#splitLayerName').hidden = !!destination.value;
+  $('#splitColorRegions').textContent = destination.value ? 'Move selected regions to layer' : 'Move selected regions to new layer';
+  $('#regionSelectionInfo').textContent = regionSelecting
+    ? `${selectedColorRegions.size} region(s) selected. Click separate regions in the selected layer; click again to deselect.`
+    : 'Choose the source layer containing the region, then its destination. The destination can be an existing layer of the same colour.';
+  rebuildColorPrintPreview();
+  workspace?.refresh();
+}
+
+function rebuildColorPrintPreview() {
+  colorPrintPreview = null;
+  if (!colorAnalysis) return;
+  const active = colorActivePalette(), index = active.findIndex(entry => entry.id === previewLayerId);
+  if (index < 0) return;
+  const canvas = document.createElement('canvas'); canvas.width = colorAnalysis.w_px; canvas.height = colorAnalysis.h_px;
+  const ctx = canvas.getContext('2d');
+  active.slice(index).forEach(entry => { const image = colorMaskImages.get(entry.id); if (image) ctx.drawImage(image, 0, 0); });
+  ctx.globalCompositeOperation = 'source-in'; ctx.fillStyle = active[index].hex; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  colorPrintPreview = canvas;
+}
+
+function rebuildColorSelectionOverlay() {
+  if (!selectedColorRegions.size) { colorSelectionOverlay = null; return; }
+  if (!colorAnalysis || !colorRegionPixels) return;
+  const canvas = document.createElement('canvas'); canvas.width = colorAnalysis.w_px; canvas.height = colorAnalysis.h_px;
+  const data = new Uint8ClampedArray(canvas.width * canvas.height * 4);
+  for (let offset = 0; offset < data.length; offset += 4) {
+    const code = colorRegionPixels[offset] | (colorRegionPixels[offset + 1] << 8) | (colorRegionPixels[offset + 2] << 16);
+    if (selectedColorRegions.has(code)) {
+      const pixel = offset / 4, x = pixel % canvas.width, y = Math.floor(pixel / canvas.width);
+      const selectedAt = p => { const i = p * 4; return selectedColorRegions.has(colorRegionPixels[i] | (colorRegionPixels[i+1]<<8) | (colorRegionPixels[i+2]<<16)); };
+      const boundary = x === 0 || y === 0 || x === canvas.width-1 || y === canvas.height-1 || !selectedAt(pixel-1) || !selectedAt(pixel+1) || !selectedAt(pixel-canvas.width) || !selectedAt(pixel+canvas.width);
+      data[offset] = 150; data[offset + 1] = 160; data[offset + 2] = 209; data[offset + 3] = boundary ? 245 : 60;
+    }
+  }
+  canvas.getContext('2d').putImageData(new ImageData(data, canvas.width, canvas.height), 0, 0); colorSelectionOverlay = canvas;
+}
+
+function selectColorRegion(event) {
+  if (colorAnalyzing) return;
+  if (colorHolePlacing || !regionSelecting || !colorRegionPixels || !colorAnalysis) return;
+  const rect = colorCanvas.getBoundingClientRect();
+  // Map CSS coordinates to canvas pixels, including browser zoom/layout scaling.
+  const canvasX = (event.clientX - rect.left) * colorCanvas.width / rect.width;
+  const canvasY = (event.clientY - rect.top) * colorCanvas.height / rect.height;
+  const sourceX = (canvasX - colorView.ox) / colorView.zoom;
+  const sourceY = (canvasY - colorView.oy) / colorView.zoom;
+  const x = Math.floor(sourceX), y = Math.floor(sourceY);
+  if (x < 0 || y < 0 || x >= colorAnalysis.w_px || y >= colorAnalysis.h_px) return;
+  const offset = (y * colorAnalysis.w_px + x) * 4;
+  let code = colorRegionPixels[offset] | (colorRegionPixels[offset + 1] << 8) | (colorRegionPixels[offset + 2] << 16);
+  if (colorRegionOwners.get(code) !== regionTargetId) {
+    // A tiny highlight can be just 2–3 screen pixels across. Find the closest
+    // pixel of the requested source layer within an 8 CSS-pixel hit target.
+    const sx = colorView.zoom * rect.width / colorCanvas.width;
+    const sy = colorView.zoom * rect.height / colorCanvas.height;
+    const rx = Math.ceil(8 / sx), ry = Math.ceil(8 / sy);
+    let best = 64, nearest = 0;
+    for (let yy = Math.max(0,y-ry); yy <= Math.min(colorAnalysis.h_px-1,y+ry); yy++) {
+      for (let xx = Math.max(0,x-rx); xx <= Math.min(colorAnalysis.w_px-1,x+rx); xx++) {
+        const distance = ((xx+0.5-sourceX)*sx)**2 + ((yy+0.5-sourceY)*sy)**2;
+        if (distance >= best) continue;
+        const p = (yy*colorAnalysis.w_px+xx)*4;
+        const candidate = colorRegionPixels[p] | (colorRegionPixels[p+1]<<8) | (colorRegionPixels[p+2]<<16);
+        if (colorRegionOwners.get(candidate) === regionTargetId) { best = distance; nearest = candidate; }
+      }
+    }
+    code = nearest;
+  }
+  if (!code) { setColorStatus('Click a region in the selected layer. Tiny details have an 8 px selection margin.', 'err'); return; }
+  if (selectedColorRegions.has(code)) selectedColorRegions.delete(code); else selectedColorRegions.add(code);
+  rebuildColorSelectionOverlay(); updateColorLayerControls(); renderColorCanvas();
+}
+
+function splitColorRegions() {
+  const source = colorPalette.find(entry => entry.id === regionTargetId);
+  if (!source || !selectedColorRegions.size) return;
+  const destination = colorPalette.find(entry => entry.id === $('#regionDestinationSelect').value && entry.id !== source.id && entry.source_color_id === source.source_color_id);
+  if (!destination && colorPalette.length >= 24) { setColorStatus('This project already has 24 printable layers.', 'err'); return; }
+  const seeds = colorAnalysis.regions.filter(region => selectedColorRegions.has(region.code) && colorRegionOwners.get(region.code) === source.id).map(region => region.seed);
+  const selected = new Set(seeds.map(seedKey));
+  if (source.region_seeds != null) source.region_seeds = source.region_seeds.filter(seed => !selected.has(seedKey(seed)));
+  else source.excluded_region_seeds = [...(source.excluded_region_seeds || []), ...seeds];
+  const layer = destination || { ...source, id: `${source.source_color_id}-split-${Date.now()}`, name: $('#splitLayerName').value.trim() || 'Highlights', region_seeds: seeds, excluded_region_seeds: [], ignored: false, visible: true };
+  if (destination) {
+    if (layer.region_seeds != null) layer.region_seeds = [...layer.region_seeds, ...seeds.filter(seed => !layer.region_seeds.some(existing => seedKey(existing) === seedKey(seed)))];
+    else layer.excluded_region_seeds = (layer.excluded_region_seeds || []).filter(seed => !selected.has(seedKey(seed)));
+  } else colorPalette.push(layer);
+  selectedColorRegions.clear(); colorSelectionOverlay = null; regionSelecting = false;
+  previewLayerId = layer.id;
+  selectedPhysicalLayerId = layer.id;
+  regionTargetId = layer.id;
+  rebuildColorLayerMasks(); invalidateColorStl(); renderColorPalette(); renderColorLayers(); renderColorCanvas();
+  setColorStatus(destination ? `Moved selected regions to ${colorLayerName(layer)}.` : `Created ${colorLayerName(layer)} at the top. Its colour is shared with the original layer.`, 'ok'); scheduleProjectPersist();
+}
+
+function chooseBackgroundCandidate() {
+  backgroundCandidateId = colorAnalysis?.background_id || null;
+}
+
+function updateBackgroundTools() {
+  const box = $('#backgroundTools');
+  if (!box) return;
+  const candidate = colorPalette.find((entry) => entry.id === backgroundCandidateId);
+  box.hidden = false;
+  if (!candidate) {
+    $('#backgroundHint').textContent = colorAnalysis ? 'No background candidate detected.' : 'Analyze an image to check its background.';
+    $('#removeBackgroundBtn').hidden = false; $('#removeBackgroundBtn').disabled = true; $('#restoreBackgroundBtn').hidden = true; return;
+  }
+  const index = colorPalette.indexOf(candidate) + 1;
+  $('#backgroundHint').textContent = colorBackgroundRemoved
+    ? `Removed the exterior background of Color ${index}. Enclosed details are preserved.`
+    : `Color ${index} is a likely flat background. Remove only its edge-connected regions.`;
+  $('#removeBackgroundBtn').hidden = colorBackgroundRemoved;
+  $('#restoreBackgroundBtn').hidden = !colorBackgroundRemoved;
+  $('#removeBackgroundBtn').disabled = colorAnalyzing;
+  $('#restoreBackgroundBtn').disabled = colorAnalyzing;
+}
+
+async function setBackgroundRemoved(removed) {
+  const candidate = colorPalette.find((entry) => entry.id === backgroundCandidateId);
+  if (!candidate) return;
+  if (removed === false && candidate.pixel_count === 0) { candidate.ignored = false; candidate.visible = true; }
+  const previous = colorBackgroundRemoved;
+  colorBackgroundRemoved = removed;
+  $('#removeBackgroundBtn').disabled = true;
+  $('#restoreBackgroundBtn').disabled = true;
+  const success = await analyzeColorLayers({ preservePalette: true });
+  if (!success) colorBackgroundRemoved = previous;
+  updateBackgroundTools();
+  $('#removeBackgroundBtn').disabled = false;
+  $('#restoreBackgroundBtn').disabled = false;
+}
+
+function moveColorLayer(index, delta) {
+  const next = index + delta;
+  if (next < 0 || next >= colorPalette.length) return;
+  [colorPalette[index], colorPalette[next]] = [colorPalette[next], colorPalette[index]];
+  invalidateColorStl();
+  renderColorPalette(); renderColorLayers(); renderColorPlan(); renderColorCanvas();
+  scheduleProjectPersist();
+}
+
+function renderColorLayers() {
+  if (workspace) { renderColorPlan(); workspace.refresh(); return; }
+  const panel = $('#colorLayerPanel');
+  panel.innerHTML = '';
+  colorPalette.forEach((entry, index) => {
+    const row = el('div', 'layer-row' + (entry.ignored ? ' is-ignored' : ''));
+    const thumb = document.createElement('img');
+    thumb.className = 'layer-thumb'; thumb.src = entry.mask_png; thumb.alt = `Color ${index + 1} mask`;
+    const name = el('span', 'layer-name');
+    const swatch = el('span', 'layer-swatch'); swatch.style.background = entry.hex;
+    const text = document.createElement('span'); text.textContent = `${colorLayerName(entry, index)}${entry.pixel_count === 0 ? ' · removed' : entry.ignored ? ' · ignored' : ''}`;
+    name.append(swatch, text);
+    const eye = el('button', 'layer-eye' + (!entry.ignored && (colorPreviewMode === 'print' ? entry.id === previewLayerId : entry.visible) ? ' is-on' : ''));
+    eye.type = 'button'; eye.title = colorPreviewMode === 'print' ? `Inspect printed layer: ${colorLayerName(entry, index)}` : entry.visible ? 'Hide mask preview' : 'Show mask preview';
+    eye.innerHTML = '<svg class="eye-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg><svg class="eye-ico eye-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.8"/></svg>';
+    eye.addEventListener('click', () => { if (colorPreviewMode === 'print') previewLayerId = entry.id; else entry.visible = !entry.visible; updateColorLayerControls(); renderColorLayers(); renderColorCanvas(); });
+    row.append(thumb, name, eye);
+    panel.appendChild(row);
+  });
+  renderColorPlan();
+}
+
+function colorsAlignToSlicer(value, layerHeight) {
+  if (!(value > 0 && layerHeight > 0)) return false;
+  return Math.abs(value / layerHeight - Math.round(value / layerHeight)) < 1e-6;
+}
+
+function colorLayerBands() {
+  const { base, increment } = colorDimensionValues();
+  let top = base;
+  return colorActivePalette().map(entry => {
+    const bottom = top, thickness = entry.height_mm == null ? increment : Number(entry.height_mm);
+    top += thickness;
+    return { entry, bottom, top, thickness };
+  });
+}
+
+function renderColorLayerHeights() {
+  const container = $('#colorLayerHeights');
+  container.innerHTML = '';
+  if (!colorActivePalette().length) { container.textContent = 'Upload an image to customize layer heights.'; return; }
+  colorLayerBands().forEach(({ entry }, index) => {
+    const row = el('div', 'field');
+    const label = el('label', 'field-label');
+    const id = `colorLayerHeight-${index}`;
+    label.htmlFor = id;
+    const name = document.createElement('span'); name.textContent = colorLayerName(entry);
+    const value = el('span', 'field-value');
+    const input = document.createElement('input');
+    input.type = 'number'; input.id = id; input.min = '0.05'; input.max = '30'; input.step = '0.05';
+    input.placeholder = $('#colorIncrement').value; input.value = entry.height_mm ?? '';
+    input.addEventListener('input', () => {
+      entry.height_mm = input.value === '' ? null : Number(input.value);
+      invalidateColorStl(); renderColorPlan(); scheduleProjectPersist();
+    });
+    value.append(input, document.createTextNode(' mm')); label.append(name, value); row.append(label); container.append(row);
+  });
+}
+
+function renderColorPlan() {
+  workspace?.refresh();
+  const card = $('#colorPlanCard');
+  const map = $('#colorHeightMap');
+  const note = $('#colorPlanNote');
+  const active = colorActivePalette();
+  const { base, increment, slicer } = colorDimensionValues();
+  card.hidden = !colorPalette.length;
+  map.innerHTML = '';
+  const bands = colorLayerBands();
+  if (!active.length || !(base > 0 && increment > 0) || bands.some(band => !Number.isFinite(band.thickness) || band.thickness < 0.05 || band.thickness > 30)) {
+    note.textContent = 'Enable a colour, use a positive base and increment, and set each layer height between 0.05 and 30 mm.';
+    note.className = 'color-plan-note is-warning';
+    return;
+  }
+  bands.forEach(({ entry, top, thickness }) => {
+    const row = el('div', 'height-row');
+    const swatch = el('span', 'height-swatch'); swatch.style.background = entry.hex;
+    const text = document.createElement('span'); text.textContent = colorLayerName(entry, colorPalette.indexOf(entry));
+    const height = document.createElement('b');
+    const layerText = colorsAlignToSlicer(top, slicer) ? ` · before layer ${Math.round(top / slicer) + 1}` : '';
+    height.textContent = `${thickness.toFixed(2)} mm · top Z ${top.toFixed(2)} mm${layerText}`;
+    row.append(swatch, text, height); map.appendChild(row);
+  });
+  const aligned = colorsAlignToSlicer(base, slicer) && bands.every(band => colorsAlignToSlicer(band.thickness, slicer));
+  note.className = 'color-plan-note' + (aligned ? '' : ' is-warning');
+  const alignment = aligned
+    ? `All heights align to ${slicer.toFixed(2)} mm slicer layers.`
+    : `Warning: a height does not align cleanly with ${slicer.toFixed(2)} mm slicer layers; geometry is not rounded.`;
+  // A general stepped colour height map cannot by itself produce arbitrary
+  // multi-colour regions from global filament changes. State that plainly here
+  // instead of promising an unsafe/incorrect swap sequence.
+  note.textContent = `${alignment} Print each colour through its listed top Z, then change filament. Each slab includes all higher regions; the base uses the first colour. A colour can return at a later height. STL contains geometry only: configure filament changes in your slicer.`;
+}
+
+function updateColorMetrics() {
+  if (!colorAnalysis) return;
+  const width = Math.max(0, num($('#colorWidth')));
+  const height = width * colorAnalysis.h_px / colorAnalysis.w_px;
+  $('#colorHeightReadout').textContent = `Auto height: ${height.toFixed(1)} mm · aspect ratio locked`;
+  const pixel = width / colorAnalysis.w_px;
+  const feature = $('#colorFeatureNote');
+  if (pixel < 0.4) {
+    feature.textContent = `Printability note: one source pixel is ${pixel.toFixed(2)} mm; single-pixel features may be below a typical FDM nozzle width.`;
+  } else {
+    feature.textContent = `Image scale: 1 px = ${pixel.toFixed(2)} mm · height ${height.toFixed(1)} mm`;
+  }
+  renderColorPlan();
+  renderColorCanvas();
+}
+
+function autoColorHole() {
+  if (!colorAnalysis || !colorRegionPixels) { setColorStatus('Upload an illustration before placing a hole.', 'err'); return; }
+  const activeIds = new Set(colorActivePalette().map(entry => entry.id));
+  const w = colorAnalysis.w_px, h = colorAnalysis.h_px, scale = num($('#colorWidth')) / w;
+  for (let y = 0; y < h; y++) {
+    let sum = 0, count = 0;
+    for (let x = 0; x < w; x++) {
+      const p = (y*w+x)*4, code = colorRegionPixels[p] | (colorRegionPixels[p+1]<<8) | (colorRegionPixels[p+2]<<16);
+      if (code && activeIds.has(colorRegionOwners.get(code))) { sum += x; count++; }
+    }
+    if (!count) continue;
+    $('#colorHoleEnabled').checked = true;
+    $('#colorHoleX').value = ((sum/count-w/2)*scale).toFixed(2);
+    $('#colorHoleY').value = ((h/2-y)*scale+num($('#colorHoleDiameter'))/2+0.5).toFixed(2);
+    colorHolePlacing = false; invalidateColorStl(); fitColorCanvas(); scheduleProjectPersist();
+    setColorStatus('Base-only hole placed above the artwork; the relief remains intact.');
+    return;
+  }
+}
+
+function setupColorCanvas() {
+  colorCanvas = $('#colorCanvas');
+  colorCtx = colorCanvas.getContext('2d');
+  colorCanvas.addEventListener('click', selectColorRegion);
+  colorCanvas.addEventListener('click', event => {
+    if (!colorHolePlacing || !colorAnalysis || !$('#colorHoleEnabled').checked) return;
+    const rect = colorCanvas.getBoundingClientRect(), scale = num($('#colorWidth')) / colorAnalysis.w_px;
+    const px = ((event.clientX-rect.left)*colorCanvas.width/rect.width-colorView.ox)/colorView.zoom;
+    const py = ((event.clientY-rect.top)*colorCanvas.height/rect.height-colorView.oy)/colorView.zoom;
+    $('#colorHoleX').value = ((px-colorAnalysis.w_px/2)*scale).toFixed(2);
+    $('#colorHoleY').value = ((colorAnalysis.h_px/2-py)*scale).toFixed(2);
+    colorHolePlacing = false; $('#colorHolePlace').classList.remove('is-active');
+    invalidateColorStl(); fitColorCanvas(); scheduleProjectPersist();
+  });
+  $('#colorZoomFit').addEventListener('click', fitColorCanvas);
+}
+
+function fitColorCanvas() {
+  if (!colorAnalysis || !colorCanvas) return;
+  const wrap = $('#colorCanvasWrap');
+  if (!wrap.clientWidth || !wrap.clientHeight) return;
+  const width = Math.max(1, wrap.clientWidth), height = Math.max(1, wrap.clientHeight);
+  colorCanvas.width = width; colorCanvas.height = height;
+  let left = 0, top = 0, right = colorAnalysis.w_px, bottom = colorAnalysis.h_px;
+  if ($('#colorHoleEnabled').checked && num($('#colorWidth')) > 0) {
+    const mm = num($('#colorWidth')) / colorAnalysis.w_px, radius = (num($('#colorHoleDiameter'))/2+2)/mm;
+    const x = num($('#colorHoleX'))/mm+colorAnalysis.w_px/2, y = colorAnalysis.h_px/2-num($('#colorHoleY'))/mm;
+    left = Math.min(left,x-radius); top = Math.min(top,y-radius); right = Math.max(right,x+radius); bottom = Math.max(bottom,y+radius);
+  }
+  const scale = Math.min(width / (right-left), height / (bottom-top)) * 0.93;
+  colorView.zoom = scale;
+  colorView.ox = (width-(right-left)*scale)/2-left*scale;
+  colorView.oy = (height-(bottom-top)*scale)/2-top*scale;
+  renderColorCanvas();
+}
+
+function renderColorCanvas() {
+  if (!colorCtx || !colorCanvas) return;
+  colorCtx.clearRect(0, 0, colorCanvas.width, colorCanvas.height);
+  if (!colorAnalysis) return;
+  // Draw from bottom to top. Masks are normally disjoint; this order also makes
+  // any boundary overlap visibly match the user's chosen height order.
+  if (colorPreviewMode === 'print' && colorPrintPreview) {
+    colorCtx.drawImage(colorPrintPreview, colorView.ox, colorView.oy, colorAnalysis.w_px * colorView.zoom, colorAnalysis.h_px * colorView.zoom);
+  } else colorPalette.forEach((entry) => {
+    const image = colorMaskImages.get(entry.id);
+    if (!entry.ignored && (entry.visible || colorPreviewMode === 'artwork') && image) {
+      colorCtx.drawImage(image, colorView.ox, colorView.oy, colorAnalysis.w_px * colorView.zoom, colorAnalysis.h_px * colorView.zoom);
+    }
+  });
+  if (colorSelectionOverlay && regionSelecting && colorPreviewMode === 'regions') colorCtx.drawImage(colorSelectionOverlay, colorView.ox, colorView.oy, colorAnalysis.w_px * colorView.zoom, colorAnalysis.h_px * colorView.zoom);
+  if ($('#colorHoleEnabled').checked && num($('#colorWidth')) > 0) {
+    const mm = num($('#colorWidth'))/colorAnalysis.w_px, radius = num($('#colorHoleDiameter'))/2/mm*colorView.zoom;
+    const x = colorView.ox+(colorAnalysis.w_px/2+num($('#colorHoleX'))/mm)*colorView.zoom;
+    const y = colorView.oy+(colorAnalysis.h_px/2-num($('#colorHoleY'))/mm)*colorView.zoom;
+    colorCtx.save(); colorCtx.strokeStyle = '#3A4267'; colorCtx.lineWidth = 2; colorCtx.fillStyle = 'rgba(150,160,209,.16)';
+    colorCtx.beginPath(); colorCtx.arc(x,y,radius+2/mm*colorView.zoom,0,Math.PI*2); colorCtx.fill(); colorCtx.stroke();
+    colorCtx.beginPath(); colorCtx.arc(x,y,radius,0,Math.PI*2); colorCtx.stroke(); colorCtx.restore();
+  }
+  $('#colorPreviewHint').textContent = regionSelecting ? 'Click connected regions to select highlights' : colorPreviewMode === 'print' ? 'printed layer preview · includes every higher region' : 'surface regions · original colour assignment';
+}
+
+async function buildColorMaskAlpha() {
+  if (!colorAnalysis) return;
+  await Promise.all(colorPalette.map(async (entry) => {
+    if (colorMaskAlpha.has(entry.id)) return;
+    const image = colorMaskImages.get(entry.id) || await imageFromSource(entry.mask_png);
+    const canvas = document.createElement('canvas');
+    canvas.width = colorAnalysis.w_px; canvas.height = colorAnalysis.h_px;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    colorMaskAlpha.set(entry.id, context.getImageData(0, 0, canvas.width, canvas.height).data);
+  }));
+}
+
+function initColorThree() {
+  const canvas = $('#colorThreeCanvas');
+  colorRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  colorRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  colorRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  colorScene = new THREE.Scene();
+  colorCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+  colorControls = new OrbitControls(colorCamera, canvas);
+  colorControls.enableDamping = true; colorControls.dampingFactor = 0.08;
+  addStudioLighting(colorRenderer, colorScene);
+  colorGrid = new THREE.GridHelper(8, 20, 0x96a0d1, 0x96a0d1);
+  colorGrid.material.transparent = true; colorGrid.material.opacity = 0.18;
+  colorGrid.visible = false; colorScene.add(colorGrid);
+  // STL thickness is Z: put the grid behind its XY backing, not through it.
+  colorGrid.rotation.x = Math.PI / 2;
+  colorModelGroup = new THREE.Group(); colorScene.add(colorModelGroup);
+  const animateColor = () => { requestAnimationFrame(animateColor); colorControls.update(); colorRenderer.render(colorScene, colorCamera); };
+  animateColor();
+}
+
+function resizeColorThree() {
+  if (!colorRenderer) return;
+  const viewport = $('#colorViewport');
+  const width = viewport.clientWidth, height = viewport.clientHeight;
+  if (!width || !height) return;
+  colorRenderer.setSize(width, height);
+  colorCamera.aspect = width / height;
+  colorCamera.updateProjectionMatrix();
+}
+
+function fitColorCamera() {
+  if (!colorModelGroup || !colorModelGroup.children.length) return;
+  const sphere = new THREE.Box3().setFromObject(colorModelGroup).getBoundingSphere(new THREE.Sphere());
+  const distance = sphere.radius * 2.7;
+  colorCamera.position.set(distance * 0.22, distance * 0.12, distance);
+  colorCamera.near = distance / 100; colorCamera.far = distance * 100; colorCamera.updateProjectionMatrix();
+  colorControls.target.copy(sphere.center); colorControls.update();
+}
+
+function sampledColorAt(xMm, yMm) {
+  if (!colorAnalysis) return null;
+  const widthMm = Math.max(1e-6, num($('#colorWidth')));
+  const scale = widthMm / colorAnalysis.w_px;
+  const x = Math.max(0, Math.min(colorAnalysis.w_px - 1, Math.round(xMm / scale + colorAnalysis.w_px / 2)));
+  const y = Math.max(0, Math.min(colorAnalysis.h_px - 1, Math.round(colorAnalysis.h_px / 2 - yMm / scale)));
+  // Prefer the highest listed visible region if contour smoothing caused a tiny
+  // shared edge in the preview masks.
+  for (let i = colorPalette.length - 1; i >= 0; i--) {
+    const entry = colorPalette[i];
+    if (entry.ignored) continue;
+    const alpha = colorMaskAlpha.get(entry.id);
+    if (alpha && alpha[(y * colorAnalysis.w_px + x) * 4 + 3] > 0) return entry;
+  }
+  return null;
+}
+
+async function loadColorStl(blob, token = null) {
+  const loader = new STLLoader();
+  const buffer = await blob.arrayBuffer();
+  if (token !== null && !colorModelState.accepts(token)) return false;
+  const geometry = loader.parse(buffer);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const sceneScale = 3 / (Math.max(size.x, size.y, size.z) || 1);
+  const position = geometry.getAttribute('position');
+  const materialTriangles = new Map();
+  const active = colorActivePalette();
+  const { base, increment } = colorDimensionValues();
+  const bands = colorLayerBands();
+  active.forEach((entry) => materialTriangles.set(entry.id, []));
+  const clip = (vertices, z, above) => {
+    const output = [];
+    vertices.forEach((b, index) => {
+      const a = vertices[(index + vertices.length - 1) % vertices.length];
+      const ain = above ? a[2] >= z : a[2] <= z;
+      const bin = above ? b[2] >= z : b[2] <= z;
+      if (ain !== bin) { const t = (z - a[2]) / (b[2] - a[2]); output.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), z]); }
+      if (bin) output.push(b);
+    });
+    return output;
+  };
+  const append = (vertices, target) => {
+    for (let k = 1; k + 1 < vertices.length; k++) {
+      const a = vertices[0], b = vertices[k], c = vertices[k + 1];
+      const u = b.map((v, j) => v - a[j]), v = c.map((value, j) => value - a[j]);
+      if (Math.hypot(u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]) < 1e-12) continue;
+      for (const point of [a,b,c]) target.push((point[0]-center.x)*sceneScale, (point[1]-center.y)*sceneScale, (point[2]-center.z)*sceneScale);
+    }
+  };
+  for (let i = 0; i < position.count; i += 3) {
+    const triangle = [0,1,2].map(k => [position.getX(i+k),position.getY(i+k),position.getZ(i+k)]);
+    const low = Math.min(...triangle.map(p => p[2])), high = Math.max(...triangle.map(p => p[2]));
+    if (high-low < 1e-6) {
+      const match = bands.findIndex(band => high <= band.top + 1e-6);
+      const index = match < 0 ? active.length - 1 : match;
+      append(triangle, materialTriangles.get(active[index].id));
+    } else active.forEach((entry, index) => {
+      const bottom = index === 0 ? box.min.z : bands[index].bottom;
+      const top = index === active.length-1 ? Math.max(box.max.z,bands[index].top) : bands[index].top;
+      if (high <= bottom || low >= top) return;
+      append(clip(clip(triangle,bottom,true),top,false),materialTriangles.get(entry.id));
+    });
+  }
+  while (colorModelGroup.children.length) { const part = colorModelGroup.children[0]; part.geometry.dispose(); part.material.dispose(); colorModelGroup.remove(part); }
+  const addPart = (triangles, color) => {
+    if (!triangles.length) return;
+    const part = new THREE.Mesh(makePartGeometry(triangles), new THREE.MeshStandardMaterial({ color, roughness: 0.52, metalness: 0.04, flatShading: true }));
+    colorModelGroup.add(part);
+  };
+  active.forEach(entry => addPart(materialTriangles.get(entry.id), entry.hex));
+  geometry.dispose();
+  colorGrid.visible = true;
+  colorGrid.position.set(0, 0, (box.min.z - center.z) * sceneScale - 0.05);
+  resizeColorThree(); fitColorCamera();
+  $('#colorVpEmpty').hidden = true;
+  $('#colorResetView').hidden = false;
+  $('#colorVpInfo').hidden = false;
+  $('#colorVpInfo').innerHTML = `base <b>${base.toFixed(2)}</b> mm · top Z <b>${bands.at(-1).top.toFixed(2)}</b> mm · <b>${active.length}</b> printable layers`;
+  return true;
+}
+
+async function generateColorLayers() {
+  if (colorModelState.generating || colorAnalyzing) return;
+  if (!colorSourceFile || !colorAnalysis) { setColorStatus('Analyze a colour illustration before generating.', 'err'); return; }
+  if (!colorActivePalette().length) { setColorStatus('Enable at least one colour layer before generating.', 'err'); return; }
+  const { width, base, increment } = colorDimensionValues();
+  if (!(width > 0 && base > 0 && increment > 0)) { setColorStatus('Width, base thickness, and increment must be greater than zero.', 'err'); return; }
+  if (colorLayerBands().some(band => !Number.isFinite(band.thickness) || band.thickness < 0.05 || band.thickness > 30)) { setColorStatus('Each layer height must be between 0.05 and 30 mm.', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file', colorSourceFile, colorSourceName || 'illustration.png');
+  fd.append('width', String(width));
+  fd.append('base', String(base));
+  fd.append('increment', String(increment));
+  fd.append('alpha_threshold', '8');
+  fd.append('cleanup_min_area', String(Math.max(0, int($('#colorCleanup')))));
+  fd.append('palette', JSON.stringify(colorAnalysis.palette));
+  fd.append('layers', JSON.stringify(serializablePalette()));
+  if ($('#colorHoleEnabled').checked) fd.append('base_hole', JSON.stringify({ x: num($('#colorHoleX')), y: num($('#colorHoleY')), diameter: num($('#colorHoleDiameter')), height: $('#colorHoleHeight').value === '' ? base : num($('#colorHoleHeight')) }));
+  fd.append('remove_background', String(colorBackgroundRemoved));
+  const button = $('#colorGenerateBtn'); button.disabled = true;
+  const token = colorModelState.begin();
+  setColorStatus('Tracing masks, extruding ordered relief, and combining the STL…');
+  try {
+    const response = await fetch('/api/color/generate', { method: 'POST', body: fd });
+    if (!response.ok) {
+      let message = 'Color STL generation failed.';
+      try { const body = await response.json(); message = body.error || body.detail || message; } catch (_) { /* non-JSON fallback */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    if (!colorModelState.accepts(token)) { setColorStatus('Settings changed during generation. Update Model to use your latest edits.'); return; }
+    if (!await loadColorStl(blob, token)) return;
+    colorStlBlob = blob;
+    colorModelState.complete(token);
+    $('#colorDownloadBtn').disabled = false;
+    setColorStatus(`Color STL ready · ${fmtSize(colorStlBlob.size)}`, 'ok');
+    workspace?.generated(colorModelState);
+  } catch (error) {
+    setColorStatus(error.message || 'Color STL generation failed.', 'err');
+  } finally {
+    colorModelState.finish(token);
+    button.disabled = false;
+    workspace?.refresh();
+  }
+}
+
+function downloadColorStl() {
+  if (!colorStlBlob || !colorModelState.current) return;
+  const base = (colorSourceName || 'color-layer-relief').replace(/\.[^.]+$/, '');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(colorStlBlob); link.download = `${base}-color-layer.stl`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+}
+
+function setupColorDropzone() {
+  const zone = $('#colorDropzone'); const input = $('#colorFileInput');
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
+  ['dragover', 'dragenter'].forEach(type => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(type => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', (event) => { const file = event.dataTransfer.files && event.dataTransfer.files[0]; if (file) setColorSource(file, file.name); });
+  input.addEventListener('change', () => { if (input.files && input.files[0]) setColorSource(input.files[0], input.files[0].name); });
+}
+
+function initColorLayerMode() {
+  initColorThree(); setupColorCanvas(); setupColorDropzone();
+  $('#lineModeTab').addEventListener('click', () => setWorkbenchMode('line'));
+  $('#colorModeTab').addEventListener('click', () => setWorkbenchMode('color'));
+  $('#colorAnalyzeBtn').addEventListener('click', analyzeColorLayers);
+  $('#removeBackgroundBtn').addEventListener('click', () => setBackgroundRemoved(true));
+  $('#restoreBackgroundBtn').addEventListener('click', () => setBackgroundRemoved(false));
+  $('#colorGenerateBtn').addEventListener('click', generateColorLayers);
+  $('#colorDownloadBtn').addEventListener('click', downloadColorStl);
+  $('#colorResetView').addEventListener('click', fitColorCamera);
+  $('#colorHoleAuto').addEventListener('click', autoColorHole);
+  $('#colorHoleEnabled').addEventListener('change', () => { colorHolePlacing = false; if ($('#colorHoleEnabled').checked && num($('#colorHoleX')) === 0 && num($('#colorHoleY')) === 0) autoColorHole(); invalidateColorStl(); fitColorCanvas(); scheduleProjectPersist(); });
+  ['#colorHoleDiameter','#colorHoleHeight','#colorHoleX','#colorHoleY'].forEach(selector => $(selector).addEventListener('input', () => { invalidateColorStl(); fitColorCanvas(); scheduleProjectPersist(); }));
+  $('#colorHolePlace').addEventListener('click', () => { if (!colorAnalysis) return; const wasEnabled = $('#colorHoleEnabled').checked; $('#colorHoleEnabled').checked = true; if (!wasEnabled) { invalidateColorStl(); scheduleProjectPersist(); } regionSelecting = false; colorHolePlacing = !colorHolePlacing; $('#colorHolePlace').classList.toggle('is-active',colorHolePlacing); updateColorLayerControls(); setColorStatus(colorHolePlacing ? 'Click the preview to position the base-only hole. The tab must touch the artwork.' : 'Hole positioning stopped.'); });
+  ['#colorWidth', '#colorBase', '#colorIncrement'].forEach((selector) => $(selector).addEventListener('input', () => { invalidateColorStl(); updateColorMetrics(); renderColorLayerHeights(); }));
+  $('#colorResetHeights').addEventListener('click', () => { colorPalette.forEach(entry => { entry.height_mm = null; }); invalidateColorStl(); renderColorLayerHeights(); renderColorPlan(); scheduleProjectPersist(); });
+  $('#colorSlicerLayer').addEventListener('input', () => { invalidateColorStl(); updateColorMetrics(); });
+  $('#colorCleanup').addEventListener('change', () => { if (colorSourceFile) analyzeColorLayers(); });
+  $('#colorPaletteSize').addEventListener('change', () => { savedColorPalette = null; if (colorSourceFile) analyzeColorLayers({ resetLayers: true }); });
+  $('#colorPreviewMode').addEventListener('change', (e) => { colorPreviewMode = e.target.value; regionSelecting = false; updateColorLayerControls(); renderColorLayers(); renderColorCanvas(); });
+  $('#printLayerSelect').addEventListener('change', (e) => { previewLayerId = e.target.value; updateColorLayerControls(); renderColorLayers(); renderColorCanvas(); });
+  $('#regionLayerSelect').addEventListener('change', (e) => { regionTargetId = e.target.value; selectedPhysicalLayerId = regionTargetId; selectedColorRegions.clear(); if (regionSelecting) { const source = colorPalette.find(entry => entry.id === regionTargetId); if (source) source.visible = true; } rebuildColorSelectionOverlay(); updateColorLayerControls(); renderColorLayers(); renderColorCanvas(); });
+  $('#selectColorRegions').addEventListener('click', () => { regionSelecting = !regionSelecting; if (regionSelecting) { colorPreviewMode = 'regions'; $('#colorPreviewMode').value = 'regions'; const source = colorPalette.find(entry => entry.id === regionTargetId); if (source) source.visible = true; } updateColorLayerControls(); renderColorLayers(); renderColorCanvas(); });
+  $('#splitColorRegions').addEventListener('click', splitColorRegions);
+  $('#regionDestinationSelect').addEventListener('change', () => updateColorLayerControls());
+  $('#clearColorRegions').addEventListener('click', () => { selectedColorRegions.clear(); rebuildColorSelectionOverlay(); updateColorLayerControls(); renderColorCanvas(); });
+  window.addEventListener('resize', () => { resizeColorThree(); if (colorAnalysis && activeMode === 'color') fitColorCanvas(); });
+}
+
+// Small UI adapter: the existing pipeline remains the only mask/model state owner.
+function fitWorkspacePreview() {
+  if (activeMode === 'color') { fitColorCanvas(); resizeColorThree(); }
+  else { fitCanvas(); resize(); }
+}
+
+function cancelWorkspaceTool() {
+  regionSelecting = false; colorHolePlacing = false; selectedColorRegions.clear();
+  colorSelectionOverlay = null; $('#colorHolePlace').classList.remove('is-active');
+  updateColorLayerControls(); renderColorCanvas();
+  if (activeMode === 'line') setTool('select');
+  workspace?.refresh();
+}
+
+function workspaceAdapter() {
+  const refreshLayers = () => { renderColorPalette(); renderColorLayers(); renderColorPlan(); renderColorCanvas(); scheduleProjectPersist(); };
+  const selectLayer = id => {
+    const entry = colorPalette.find(layer => layer.id === id); if (!entry) return;
+    selectedPhysicalLayerId = id;
+    if (!entry.ignored && entry.pixel_count) {
+      if (regionTargetId !== id) { selectedColorRegions.clear(); colorSelectionOverlay = null; }
+      regionTargetId = id; previewLayerId = id;
+    }
+    updateColorLayerControls(); renderColorCanvas(); workspace?.refresh();
+  };
+  const selected = () => colorPalette.find(entry => entry.id === selectedPhysicalLayerId);
+  return {
+    state() {
+      const isColor = activeMode === 'color', info = isColor ? colorAnalysis : analysis;
+      const dimensions = colorDimensionValues(), bands = isColor ? colorLayerBands() : [];
+      const entry = colorPalette.find(layer => layer.id === selectedPhysicalLayerId) || colorPalette.find(layer => layer.id === regionTargetId);
+      let width = isColor ? dimensions.width : num($('#width'));
+      let height = info ? width * info.h_px / info.w_px : 0;
+      if (!isColor && info) { width = num($('#width')) * info.w_px / Math.max(info.w_px,info.h_px); height = num($('#width')) * info.h_px / Math.max(info.w_px,info.h_px); }
+      return {
+        mode:activeMode, source:isColor?colorSourceFile:sourceFile, filename:isColor?colorSourceName:sourceName, url:isColor?colorSourceUrl:sourceUrl,
+        analyzed:Boolean(info), analyzing:isColor&&colorAnalyzing, wpx:info?.w_px||0,hpx:info?.h_px||0,
+        layers:colorPalette, bands, selectedId:entry?.id||null,
+        regionCount:entry ? [...colorRegionOwners.values()].filter(owner=>owner===entry.id).length : 0,
+        selecting:isColor?regionSelecting:activeTool==='hole', placing:isColor?colorHolePlacing:activeTool==='hole', selectedCount:selectedColorRegions.size,
+        count:isColor?colorActivePalette().length:info?2:0, width,height, base:isColor?dimensions.base:num($('#base')),
+        top:isColor?(bands.at(-1)?.top||dimensions.base):num($('#base'))+num($('#color')), increment:$('#colorIncrement').value, slicer:dimensions.slicer,
+        tabHeight:isColor&&$('#colorHoleEnabled').checked?(num($('#colorHoleHeight'))||dimensions.base):0,
+        model:isColor?colorModelState:lineModelState, fileSize:(isColor?colorStlBlob:stlBlob)?fmtSize((isColor?colorStlBlob:stlBlob).size):'',
+        status:$(isColor?'#colorStatus':'#status').textContent, statusKind:$(isColor?'#colorStatus':'#status').classList.contains('err')?'err':'',
+        canUndo:undoStack.length>0,canRedo:redoStack.length>0,
+      };
+    },
+    layers: {
+      select:selectLayer,
+      move:moveColorLayer,
+      reorder(fromId,toId) {
+        const from=colorPalette.findIndex(entry=>entry.id===fromId), to=colorPalette.findIndex(entry=>entry.id===toId);
+        if (from<0 || to<0 || from===to) return;
+        const [entry]=colorPalette.splice(from,1); colorPalette.splice(to,0,entry);
+        invalidateColorStl(); refreshLayers();
+      },
+      rename(value) { const entry=selected(); if(!entry)return; entry.name=value.trim()||'Untitled layer'; updateColorLayerControls(); refreshLayers(); },
+      height(value) { const entry=selected(); if(!entry)return; entry.height_mm=value===''?null:Number(value); invalidateColorStl(); renderColorLayerHeights(); renderColorPlan(); scheduleProjectPersist(); },
+      include(value) { const entry=selected(); if(!entry)return; entry.ignored=!value; invalidateColorStl(); refreshLayers(); if(value)selectLayer(entry.id); },
+      visibility(id) { const entry=colorPalette.find(layer=>layer.id===id); if(!entry)return; entry.visible=!entry.visible; workspace.setPreview('regions'); refreshLayers(); },
+    },
+    preview(key,version) {
+      if (activeMode==='color') {
+        colorPreviewMode=key==='print'?'print':key==='artwork'&&version==='processed'?'artwork':'regions';
+        $('#colorPreviewMode').value=colorPreviewMode==='artwork'?'regions':colorPreviewMode;
+        if(key!=='regions')regionSelecting=false;
+        if(key==='3d')colorHolePlacing=false;
+        updateColorLayerControls(); renderColorCanvas();
+      } else loadLayerPreview();
+    },
+    fit:fitWorkspacePreview,
+    generate:()=>activeMode==='color'?generateColorLayers():generate(),
+    download:()=>activeMode==='color'?downloadColorStl():download(),
+    analyze:()=>activeMode==='color'?analyzeColorLayers():analyze(),
+    upload:()=>$(activeMode==='color'?'#colorFileInput':'#fileInput').click(),
+    source:file=>activeMode==='color'?setColorSource(file,file.name):setSource(file,file.name),
+    async example() { const response=await fetch('/static/examples/chef.png'); if(!response.ok)return; const file=await response.blob(); $('#colorPaletteSize').value='5'; setWorkbenchMode('color'); workspace.setPreview('regions'); setColorSource(file,'chef-example.png'); },
+    async engine(mode) {
+      const file=activeMode==='color'?colorSourceFile:sourceFile, name=activeMode==='color'?colorSourceName:sourceName;
+      setWorkbenchMode(mode); workspace.setPreview('artwork');
+      if(file) {
+        if(mode==='line'&&sourceFile!==file)await applySource(file,name);
+        if(mode==='color'&&colorSourceFile!==file){$('#colorPaletteSize').value='2';await setColorSource(file,name);}
+      }
+    },
+    separate:splitColorRegions, cancel:cancelWorkspaceTool, undo:undoHoles, redo:redoHoles,
+  };
+}
+
 function init() {
   initThree();
   setupDropzone();
@@ -1109,6 +2101,7 @@ function init() {
   initTheme();
   initLanguage();
   initMotion();
+  initColorLayerMode();
 
   // layers (PS-style, preview-only) + editor canvas + tools + original + holes
   $('#layerBaseEye').addEventListener('click', onLayerToggle);
@@ -1135,16 +2128,16 @@ function init() {
   $('#holeReset').addEventListener('click', resetInvalidHoles);
   window.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey, tg = e.target && e.target.tagName;
-    if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? redoHoles() : undoHoles(); return; }
-    if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoHoles(); return; }
+    if (activeMode === 'line' && tg !== 'INPUT' && tg !== 'TEXTAREA' && mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? redoHoles() : undoHoles(); return; }
+    if (activeMode === 'line' && tg !== 'INPUT' && tg !== 'TEXTAREA' && mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoHoles(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && activeTool === 'select' && tg !== 'INPUT') deleteSelectedHole();
   });
   window.addEventListener('resize', () => { syncOrigThumb(); if (analysis) fitCanvas(); });
 
   // params -> gauge
-  bindPair('#width', '#widthRange', () => { renderGauge(); if (analysis) renderCanvas(); });
-  bindPair('#base', '#baseRange', renderGauge);
-  bindPair('#color', '#colorRange', renderGauge);
+  bindPair('#width', '#widthRange', () => { markLineDirty(); renderGauge(); if (analysis) renderCanvas(); });
+  bindPair('#base', '#baseRange', () => { markLineDirty(); renderGauge(); });
+  bindPair('#color', '#colorRange', () => { markLineDirty(); renderGauge(); });
   $('#hole').addEventListener('input', () => { snapshotHoles(); holes.forEach(h => { h.inner = num($('#hole')) / 2; }); renderGauge(); recompute(); });
 
   // thresholds -> re-analyze (debounced)
@@ -1162,6 +2155,549 @@ function init() {
   $('#modal').querySelector('.modal-backdrop').addEventListener('click', hideModal);
 
   renderGauge();
+  workspace = createWorkspace(workspaceAdapter());
+  setWorkbenchMode(activeMode);
+  updateBackgroundTools();
+  for (const id of ['layerBase','layerRelief']) $('#'+id).addEventListener('click', event => { if(event.target.closest('button'))return; $('#layerBase').classList.toggle('is-selected',id==='layerBase'); $('#layerRelief').classList.toggle('is-selected',id==='layerRelief'); loadLayerPreview(); });
 }
 
+// ---------- product accounts, drafts, projects, sharing and community ----------
+// The image/vector pipeline above deliberately remains the editor's source of
+// truth.  This layer serializes its editable settings plus the original image;
+// it never attempts to turn an STL back into an editable project.
+const GUEST_DRAFT_KEY = 'drafterflow_guest_project_v1';
+let currentUser = null;
+let currentProjectId = null;
+let lineSourceDataUrl = null;
+let colorSourceDataUrl = null;
+let savedColorPalette = null;
+let authMode = 'login';
+let authIntent = null;
+let productReady = false;
+let isRestoringProject = false;
+let persistTimer = null;
+let autosaveInFlight = false;
+let viewingReadOnlyProject = false;
+
+function apiErrorMessage(data, fallback) {
+  return (data && (data.detail || data.error)) || fallback;
+}
+
+async function apiJson(path, options = {}) {
+  const opts = { ...options, headers: { ...(options.headers || {}) } };
+  if (options.body && !(options.body instanceof FormData)) opts.headers['Content-Type'] = 'application/json';
+  const response = await fetch(path, opts);
+  let data = null;
+  try { data = await response.json(); } catch (_) { /* JSON errors are normalized below */ }
+  if (!response.ok) throw new Error(apiErrorMessage(data, `Request failed (${response.status})`));
+  return data;
+}
+
+function setSaveState(message, kind = '') {
+  const node = $('#saveState');
+  if (!node) return;
+  node.textContent = message;
+  node.className = 'save-state' + (kind ? ' is-' + kind : '');
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Could not retain image locally.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function dataUrlToFile(dataUrl, name) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  return new File([blob], name || 'drawing.png', { type: blob.type || 'image/png' });
+}
+
+function rememberSource(file, mode) {
+  fileToDataUrl(file).then((dataUrl) => {
+    // Ignore a slow FileReader result after the user has already picked another file.
+    if (mode === 'line' && sourceFile === file) lineSourceDataUrl = dataUrl;
+    if (mode === 'color' && colorSourceFile === file) colorSourceDataUrl = dataUrl;
+    scheduleProjectPersist();
+  }).catch(() => setSaveState('Image stays in this tab; it could not be retained locally.', 'error'));
+}
+
+function lineSettings() {
+  return {
+    width: $('#width').value, base: $('#base').value, color: $('#color').value, hole: $('#hole').value,
+    darkThreshold: $('#darkThreshold').value, alphaThreshold: $('#alphaThreshold').value,
+    baseColor: $('#baseColor').value, colorColor: $('#colorColor').value, newHoleOuter: $('#newHoleOuter').value,
+  };
+}
+
+function colorSettings() {
+  return {
+    paletteSize: $('#colorPaletteSize').value, width: $('#colorWidth').value, base: $('#colorBase').value,
+    increment: $('#colorIncrement').value, cleanup: $('#colorCleanup').value, slicerLayer: $('#colorSlicerLayer').value,
+    removeBackground: colorBackgroundRemoved,
+    holeEnabled: $('#colorHoleEnabled').checked, holeDiameter: $('#colorHoleDiameter').value,
+    holeHeight: $('#colorHoleHeight').value,
+    holeX: $('#colorHoleX').value, holeY: $('#colorHoleY').value,
+  };
+}
+
+function serializablePalette() {
+  return colorPalette.map(({ id, rgb, lab, hex, ignored, visible, name, source_color_id, region_seeds, excluded_region_seeds, height_mm }) => ({ id, rgb, lab, hex, ignored, visible, name, source_color_id, region_seeds, excluded_region_seeds, height_mm }));
+}
+
+function projectData() {
+  return {
+    schemaVersion: 1,
+    mode: activeMode,
+    line: {
+      sourceDataUrl: lineSourceDataUrl, sourceName,
+      settings: lineSettings(), holes: holes.map(({ id, x, y, outer, inner }) => ({ id, x, y, outer, inner })),
+      selectedHoleId, layerState: { ...layerState }, snapEnabled,
+    },
+    color: {
+      sourceDataUrl: colorSourceDataUrl, sourceName: colorSourceName,
+      settings: colorSettings(), palette: serializablePalette(),
+    },
+  };
+}
+
+async function projectThumbnail() {
+  const dataUrl = activeMode === 'color' ? colorSourceDataUrl : lineSourceDataUrl;
+  if (!dataUrl) return null;
+  try {
+    const image = await imageFromSource(dataUrl);
+    const canvas = document.createElement('canvas'); canvas.width = 480; canvas.height = 300;
+    const context = canvas.getContext('2d'); context.fillStyle = '#f7f6f3'; context.fillRect(0, 0, canvas.width, canvas.height);
+    const scale = Math.min(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight) * 0.88;
+    const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+    context.drawImage(image, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    return canvas.toDataURL('image/jpeg', 0.78);
+  } catch (_) { return null; }
+}
+
+async function projectPayload() {
+  return {
+    title: ($('#projectTitle').value || 'Untitled project').trim(), mode: activeMode,
+    schemaVersion: 1, projectData: projectData(), thumbnail: await projectThumbnail(),
+  };
+}
+
+function persistGuestDraft() {
+  if (isRestoringProject) return;
+  try {
+    localStorage.setItem(GUEST_DRAFT_KEY, JSON.stringify({ title: $('#projectTitle').value, projectData: projectData(), savedAt: new Date().toISOString() }));
+    if (!currentUser) setSaveState('Guest draft saved locally');
+  } catch (_) {
+    if (!currentUser) setSaveState('Guest draft is too large for this browser.', 'error');
+  }
+}
+
+function scheduleProjectPersist() {
+  if (!productReady || isRestoringProject) return;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(async () => {
+    persistGuestDraft();
+    if (currentUser && currentProjectId && !autosaveInFlight) await saveCurrentProject({ auto: true });
+  }, 700);
+}
+
+function renderAccount() {
+  const signedIn = Boolean(currentUser);
+  $('#signInBtn').hidden = signedIn;
+  $('#accountButton').hidden = !signedIn;
+  $('#projectsNav').hidden = !signedIn;
+  $('#projects').hidden = !signedIn;
+  if (signedIn) {
+    $('#accountButton').textContent = (currentUser.name || currentUser.email || '?').trim().slice(0, 1).toUpperCase();
+    setSaveState(currentProjectId ? 'All changes saved' : 'Ready to save a project');
+  } else if (!isRestoringProject) setSaveState('Guest draft saved locally');
+}
+
+function openAuth(intent = 'save') {
+  authIntent = intent;
+  authMode = 'login';
+  renderAuthMode();
+  $('#authError').textContent = '';
+  $('#authModal').hidden = false;
+  $('#authEmail').focus();
+}
+
+function renderAuthMode() {
+  const signup = authMode === 'signup';
+  $('#authNameWrap').hidden = !signup;
+  $('#authKicker').textContent = authIntent === 'publish' ? 'Publish your work' : authIntent === 'remix' ? 'Remix this project' : 'Save your work';
+  $('#authTitle').textContent = signup ? 'Create your DrafterFlow account' : 'Sign in to DrafterFlow';
+  $('#authBody').textContent = 'Your current guest project stays right here and will be preserved after you sign in.';
+  $('#authSubmit').textContent = signup ? 'Create account' : 'Sign in';
+  $('#authSwitch').textContent = signup ? 'I already have an account' : 'Create an account';
+  $('#authPassword').autocomplete = signup ? 'new-password' : 'current-password';
+}
+
+function closeAuth() { $('#authModal').hidden = true; }
+
+async function finishAuthIntent() {
+  const intent = authIntent; authIntent = null;
+  if (intent === 'save' || intent === 'share' || intent === 'publish') {
+    const saved = await saveCurrentProject();
+    if (!saved) return;
+    if (intent === 'share') await shareCurrentProject();
+    if (intent === 'publish') openPublishDialog();
+  } else if (typeof intent === 'object' && intent.type === 'remix') {
+    await remixProject(intent.projectId);
+  }
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  const error = $('#authError'); error.textContent = '';
+  const button = $('#authSubmit'); button.disabled = true;
+  try {
+    const data = await apiJson(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/login', {
+      method: 'POST', body: JSON.stringify({ email: $('#authEmail').value, password: $('#authPassword').value, name: $('#authName').value }),
+    });
+    currentUser = data.user; closeAuth(); renderAccount(); await refreshProjects(); await refreshCommunity(); await finishAuthIntent();
+  } catch (err) { error.textContent = err.message; }
+  finally { button.disabled = false; }
+}
+
+async function saveCurrentProject({ auto = false } = {}) {
+  if (viewingReadOnlyProject && !currentProjectId) {
+    if (!auto) setSaveState('This creator disabled Remix. You can view it, but cannot save a copy.', 'error');
+    return false;
+  }
+  if (!currentUser) { if (!auto) openAuth('save'); return false; }
+  if (autosaveInFlight) return false;
+  autosaveInFlight = true; setSaveState(auto ? 'Saving…' : 'Saving…', 'saving');
+  try {
+    const payload = await projectPayload();
+    const data = await apiJson(currentProjectId ? `/api/projects/${currentProjectId}` : '/api/projects', {
+      method: currentProjectId ? 'PUT' : 'POST', body: JSON.stringify(payload),
+    });
+    currentProjectId = data.project.id;
+    localStorage.removeItem(GUEST_DRAFT_KEY);
+    setSaveState('All changes saved');
+    await refreshProjects();
+    return true;
+  } catch (err) { setSaveState(err.message || 'Could not save project', 'error'); return false; }
+  finally { autosaveInFlight = false; }
+}
+
+function clearProject() {
+  isRestoringProject = true;
+  viewingReadOnlyProject = false;
+  currentProjectId = null; lineSourceDataUrl = null; colorSourceDataUrl = null; savedColorPalette = null;
+  sourceFile = null; colorSourceFile = null; sourceName = ''; colorSourceName = ''; analysis = null; colorAnalysis = null; holes = []; colorPalette = [];
+  colorAnalysisRequest++; colorAnalyzing = false; selectedPhysicalLayerId = null;
+  selectedColorRegions.clear(); colorSelectionOverlay = null; regionSelecting = false;
+  stlBlob = null; invalidateColorStl(true); markLineDirty(true);
+  $('#colorHoleEnabled').checked = false; colorHolePlacing = false;
+  $('#projectTitle').value = 'Untitled project'; $('#maskEmpty').hidden = false; $('#colorMaskEmpty').hidden = false;
+  $('#holeCard').hidden = true; $('#origThumb').hidden = true; $('#colorOrigThumb').hidden = true;
+  $('#downloadBtn').disabled = true; $('#colorDownloadBtn').disabled = true;
+  setWorkbenchMode('color'); workspace?.setPreview('artwork'); renderHoleList(); renderColorPalette();
+  isRestoringProject = false; persistGuestDraft(); renderAccount();
+}
+
+function assignValues(settings, mapping) {
+  Object.entries(mapping).forEach(([key, id]) => { if (settings && settings[key] != null && $(id)) $(id).value = settings[key]; });
+}
+
+function applySavedColorPalette() {
+  if (!savedColorPalette || !savedColorPalette.length) return;
+  const sources = colorPalette.slice();
+  const regions = new Map((colorAnalysis.regions || []).map(region => [region.code, region]));
+  // Boundary correction may move a saved seed by a few pixels. Re-anchor it
+  // to the same pigment's nearest component, not to an unrelated height group.
+  const anchor = (seed, sourceId) => {
+    if (!colorRegionPixels || !Array.isArray(seed)) return seed;
+    const [x,y] = seed, w = colorAnalysis.w_px, h = colorAnalysis.h_px;
+    let best = Infinity, match = null;
+    for (let yy = Math.max(0,y-4); yy <= Math.min(h-1,y+4); yy++) for (let xx = Math.max(0,x-4); xx <= Math.min(w-1,x+4); xx++) {
+      const distance = (xx-x)**2 + (yy-y)**2;
+      if (distance >= best) continue;
+      const offset = (yy*w+xx)*4;
+      const code = colorRegionPixels[offset] | (colorRegionPixels[offset+1]<<8) | (colorRegionPixels[offset+2]<<16);
+      const region = regions.get(code);
+      if (region?.color_id === sourceId) { best = distance; match = region.seed; }
+    }
+    return match || seed;
+  };
+  const anchors = (seeds, sourceId) => seeds == null ? null : [...new Map(seeds.map(seed => { const updated = anchor(seed, sourceId); return [seedKey(updated), updated]; })).values()];
+  const ordered = [];
+  savedColorPalette.forEach((saved) => {
+    const match = sources.find(entry => entry.id === (saved.source_color_id || saved.id)) || sources.find(entry => entry.hex === saved.hex);
+    if (match) ordered.push({ ...match, id: saved.id, source_color_id: match.id, name: saved.name || match.name, height_mm: saved.height_mm ?? null, region_seeds: anchors(saved.region_seeds, match.id), excluded_region_seeds: anchors(saved.excluded_region_seeds || [], match.id), ignored: Boolean(saved.ignored), visible: saved.visible !== false });
+  });
+  sources.forEach((entry) => { if (!ordered.some(group => group.source_color_id === entry.id)) ordered.push(entry); });
+  colorPalette = ordered;
+}
+
+async function restoreProjectData(data, title = 'Untitled project') {
+  if (!data || typeof data !== 'object') return;
+  isRestoringProject = true;
+  try {
+    $('#projectTitle').value = title;
+    const line = data.line || {}, color = data.color || {};
+    assignValues(line.settings, { width: '#width', base: '#base', color: '#color', hole: '#hole', darkThreshold: '#darkThreshold', alphaThreshold: '#alphaThreshold', baseColor: '#baseColor', colorColor: '#colorColor', newHoleOuter: '#newHoleOuter' });
+    assignValues(color.settings, { paletteSize: '#colorPaletteSize', width: '#colorWidth', base: '#colorBase', increment: '#colorIncrement', cleanup: '#colorCleanup', slicerLayer: '#colorSlicerLayer', holeDiameter: '#colorHoleDiameter', holeX: '#colorHoleX', holeY: '#colorHoleY' });
+    $('#colorHoleEnabled').checked = color.settings?.holeEnabled === true; colorHolePlacing = false;
+    $('#colorHoleHeight').value = color.settings?.holeHeight ?? '';
+    layerState = { base: line.layerState?.base !== false, relief: line.layerState?.relief !== false };
+    snapEnabled = line.snapEnabled !== false;
+    savedColorPalette = color.palette || null;
+    if (line.sourceDataUrl) {
+      lineSourceDataUrl = line.sourceDataUrl;
+      defaultHoleSeeded = true;
+      await applySource(await dataUrlToFile(line.sourceDataUrl, line.sourceName || 'drawing.png'), line.sourceName || 'drawing.png');
+      holes = (line.holes || []).map((hole, index) => ({ id: hole.id ?? index + 1, x: Number(hole.x), y: Number(hole.y), outer: hole.outer ?? null, inner: Number(hole.inner || num($('#hole')) / 2), valid: true }));
+      holeSeq = Math.max(1, ...holes.map((hole) => Number(hole.id) + 1)); selectedHoleId = line.selectedHoleId ?? null; recompute();
+    }
+    if (color.sourceDataUrl) {
+      colorSourceDataUrl = color.sourceDataUrl;
+      await setColorSource(await dataUrlToFile(color.sourceDataUrl, color.sourceName || 'illustration.png'), color.sourceName || 'illustration.png', { removeBackground: color.settings?.removeBackground === true });
+    }
+    setWorkbenchMode(data.mode === 'color' ? 'color' : 'line'); renderGauge();
+  } catch (error) { setSaveState(`Could not restore every project detail: ${error.message}`, 'error'); }
+  finally { isRestoringProject = false; renderAccount(); }
+}
+
+function prettyDate(value) {
+  try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)); } catch (_) { return value || ''; }
+}
+
+function thumbNode(project, className) {
+  const thumb = el('div', className);
+  if (project.thumbnail) { const image = document.createElement('img'); image.src = project.thumbnail; image.alt = ''; thumb.appendChild(image); }
+  else thumb.textContent = project.mode === 'color' ? 'COLOR LAYER' : 'LINE MODE';
+  return thumb;
+}
+
+function cardButton(label, kind, action) {
+  const button = el('button', `btn ${kind === 'primary' ? 'btn-primary' : 'btn-ghost'} btn-sm`); button.type = 'button'; button.textContent = label; button.addEventListener('click', action); return button;
+}
+
+function renderProjectGrid(projects) {
+  const grid = $('#projectGrid'); grid.innerHTML = '';
+  if (!projects.length) { grid.appendChild(el('p', 'empty-gallery')).textContent = 'Your saved projects will appear here.'; return; }
+  projects.forEach((project) => {
+    const card = el('article', 'project-card'); card.appendChild(thumbNode(project, 'project-thumb'));
+    const body = el('div', 'project-card-body'); const title = document.createElement('h3'); title.textContent = project.title;
+    const meta = el('p', 'project-meta'); meta.textContent = `${project.mode === 'color' ? 'Color Layer' : 'Line Mode'} · Updated ${prettyDate(project.updatedAt)} · ${project.visibility}`;
+    const actions = el('div', 'project-card-actions');
+    actions.append(cardButton('Open', 'primary', () => openOwnedProject(project.id)), cardButton('Duplicate', 'ghost', () => duplicateProject(project.id)), cardButton('Share', 'ghost', () => shareProject(project.id)));
+    if (project.isPublished) actions.append(cardButton('Edit details', 'ghost', () => editPublishedProject(project.id)));
+    actions.append(cardButton(project.isPublished ? 'Unpublish' : 'Publish', 'ghost', () => project.isPublished ? unpublishProject(project.id) : publishProject(project.id)));
+    actions.append(cardButton('Delete', 'ghost', () => deleteOwnedProject(project.id)));
+    body.append(title, meta, actions); card.appendChild(body); grid.appendChild(card);
+  });
+}
+
+async function refreshProjects() {
+  if (!currentUser) return;
+  try { const data = await apiJson('/api/projects'); renderProjectGrid(data.projects || []); } catch (_) { /* keep editor usable if project listing fails */ }
+}
+
+async function openOwnedProject(projectId) {
+  try { const data = await apiJson(`/api/projects/${projectId}`); viewingReadOnlyProject = false; currentProjectId = projectId; await restoreProjectData(data.project.projectData, data.project.title); $('#forge').scrollIntoView({ behavior: 'smooth' }); }
+  catch (error) { setSaveState(error.message, 'error'); }
+}
+
+async function duplicateProject(projectId) {
+  try { const data = await apiJson(`/api/projects/${projectId}/duplicate`, { method: 'POST' }); await refreshProjects(); await openOwnedProject(data.project.id); }
+  catch (error) { setSaveState(error.message, 'error'); }
+}
+
+async function deleteOwnedProject(projectId) {
+  showModal({ title: 'Delete project?', body: 'This deletes the saved project and its community submission. This cannot be undone.', buttons: [
+    { label: 'Delete', primary: true, onClick: async () => { await apiJson(`/api/projects/${projectId}`, { method: 'DELETE' }); if (currentProjectId === projectId) clearProject(); await refreshProjects(); await refreshCommunity(); } },
+    { label: 'Cancel' },
+  ] });
+}
+
+async function shareProject(projectId = currentProjectId) {
+  if (!currentUser) { openAuth('share'); return; }
+  if (!projectId) { const saved = await saveCurrentProject(); if (!saved) return; projectId = currentProjectId; }
+  try {
+    const data = await apiJson(`/api/projects/${projectId}/share`, { method: 'POST' });
+    const url = new URL(data.share.path, window.location.origin).toString();
+    showModal({ title: 'Share link created', body: `Anyone with this unlisted link can view the project.\n\nShare code: ${data.share.code}\n${url}`, buttons: [
+      { label: 'Copy link', primary: true, onClick: () => navigator.clipboard?.writeText(url) }, { label: 'Close' },
+    ] }); await refreshProjects();
+  } catch (error) { setSaveState(error.message, 'error'); }
+}
+
+async function shareCurrentProject() {
+  const saved = await saveCurrentProject(); if (saved) await shareProject(currentProjectId);
+}
+
+let publishEditingId = null;
+
+function openPublishDialog(project = null) {
+  if (!currentUser) { openAuth('publish'); return; }
+  publishEditingId = project?.id || null;
+  $('#publishTitle').textContent = project ? 'Edit published work' : 'Publish to Community';
+  $('#publishSubmit').textContent = project ? 'Save changes' : 'Publish';
+  $('#publishError').textContent = '';
+  $('#publishTitleInput').value = project?.title || $('#projectTitle').value || 'Untitled project';
+  $('#publishDescription').value = project?.description || '';
+  $('#publishTags').value = formatTags(project?.tags || []);
+  renderPublishTags();
+  $('#publishAllowRemix').checked = project?.allowRemix !== false;
+  $('#publishModal').hidden = false;
+}
+
+async function editPublishedProject(projectId) {
+  if (!currentUser) return;
+  try {
+    const { project } = await apiJson(`/api/community/${projectId}`);
+    if (project.creator.id !== currentUser.id) throw new Error('Only the creator can edit this work.');
+    openPublishDialog(project);
+  } catch (error) { setSaveState(error.message, 'error'); }
+}
+
+async function publishProject(projectId = currentProjectId) {
+  if (!currentUser) { openAuth('publish'); return; }
+  if (projectId && projectId !== currentProjectId) { await openOwnedProject(projectId); }
+  const saved = await saveCurrentProject(); if (saved) openPublishDialog();
+}
+
+async function submitPublish(event) {
+  event.preventDefault(); $('#publishError').textContent = '';
+  const editingId = publishEditingId;
+  const button = $('#publishSubmit'); if (button.disabled) return; button.disabled = true;
+  try {
+    // Metadata-only editing must never save the unrelated open editor over this work.
+    if (!editingId && !await saveCurrentProject()) return;
+    const targetId = editingId || currentProjectId; if (!targetId) return;
+    await apiJson(`/api/projects/${targetId}/publish`, { method: 'POST', body: JSON.stringify({ title: $('#publishTitleInput').value, description: $('#publishDescription').value, tags: parseTags($('#publishTags').value), allowRemix: $('#publishAllowRemix').checked }) });
+    if (targetId === currentProjectId) $('#projectTitle').value = $('#publishTitleInput').value;
+    $('#publishModal').hidden = true; publishEditingId = null;
+    await refreshProjects(); await refreshCommunity(); setSaveState(editingId ? 'Published details updated' : 'Published to Community');
+  } catch (error) { $('#publishError').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
+async function unpublishProject(projectId = currentProjectId) {
+  try { await apiJson(`/api/projects/${projectId}/unpublish`, { method: 'POST' }); await refreshProjects(); await refreshCommunity(); setSaveState('Removed from Community'); }
+  catch (error) { setSaveState(error.message, 'error'); }
+}
+
+function renderCommunityGrid(projects) {
+  const grid = $('#communityGrid'); grid.innerHTML = '';
+  if (!projects.length) { grid.appendChild(el('p', 'empty-gallery')).textContent = 'No projects are published yet. Your first one could be here.'; return; }
+  projects.forEach((project) => {
+    const card = el('article', 'community-card'); card.appendChild(thumbNode(project, 'community-thumb'));
+    const body = el('div', 'community-card-body'); const title = document.createElement('h3'); title.textContent = project.title;
+    const meta = el('p', 'community-meta'); meta.textContent = `by ${project.creator.name} · ${project.mode === 'color' ? 'Color Layer' : 'Line Mode'} · ${project.remixCount} remix${project.remixCount === 1 ? '' : 'es'}`;
+    const desc = el('p', 'community-description'); desc.textContent = project.description || 'A printable DrafterFlow project.';
+    body.append(title, meta, desc);
+    if (project.tags?.length) { const tags = el('div', 'tag-list'); parseTags(project.tags).forEach((tag) => { const item = el('span', 'tag'); item.textContent = formatTags([tag]); tags.appendChild(item); }); body.appendChild(tags); }
+    const actions = el('div', 'community-card-actions'); actions.appendChild(cardButton('Open in DrafterFlow', 'primary', () => openCommunityProject(project.id)));
+    if (project.allowRemix) actions.appendChild(cardButton('Remix', 'ghost', () => requestRemix(project.id)));
+    if (currentUser?.id === project.creator.id) actions.appendChild(cardButton('Edit details', 'ghost', () => editPublishedProject(project.id)));
+    body.appendChild(actions); card.appendChild(body); grid.appendChild(card);
+  });
+}
+
+async function refreshCommunity() {
+  try { const data = await apiJson('/api/community'); renderCommunityGrid(data.projects || []); } catch (_) { $('#communityGrid').textContent = 'Community projects could not be loaded.'; }
+}
+
+async function openCommunityProject(projectId) {
+  try { const data = await apiJson(`/api/community/${projectId}`); currentProjectId = null; await restoreProjectData(data.project.projectData, data.project.title); viewingReadOnlyProject = !data.project.allowRemix; setSaveState(viewingReadOnlyProject ? 'Viewing only · this creator disabled Remix' : 'Viewing a community project · save to keep your own copy'); $('#forge').scrollIntoView({ behavior: 'smooth' }); }
+  catch (error) { setSaveState(error.message, 'error'); }
+}
+
+function requestRemix(projectId) { if (!currentUser) openAuth({ type: 'remix', projectId }); else remixProject(projectId); }
+
+async function remixProject(projectId) {
+  try { const data = await apiJson(`/api/community/${projectId}/remix`, { method: 'POST' }); await refreshProjects(); await openOwnedProject(data.project.id); setSaveState('Remix added to My Projects'); }
+  catch (error) { setSaveState(error.message, 'error'); }
+}
+
+function renderSharedProject(project) {
+  const root = $('#sharedCard'); root.innerHTML = '';
+  const card = el('article', 'shared-project'); card.appendChild(thumbNode(project, 'community-thumb'));
+  const body = el('div', 'shared-project-body'); const label = el('p', 'eyebrow'); label.textContent = `Shared by ${project.creator?.name || 'a DrafterFlow maker'}`;
+  const title = document.createElement('h1'); title.textContent = project.title; const meta = el('p', 'community-meta'); meta.textContent = `${project.mode === 'color' ? 'Color Layer' : 'Line Mode'} · unlisted project`;
+  const copy = el('p', 'community-description'); copy.textContent = 'View the editable project settings, then open it in DrafterFlow or remix a copy into your own workspace.';
+  const actions = el('div', 'shared-actions');
+  actions.appendChild(cardButton('Open in DrafterFlow', 'primary', async () => { document.querySelector('main').hidden = false; $('#sharedView').hidden = true; history.replaceState({}, '', '/'); currentProjectId = null; await restoreProjectData(project.projectData, project.title); viewingReadOnlyProject = !project.canRemix; setSaveState(viewingReadOnlyProject ? 'Viewing only · this creator disabled Remix' : 'Viewing a shared project · save to keep your own copy'); $('#forge').scrollIntoView({ behavior: 'smooth' }); }));
+  if (project.canRemix) actions.appendChild(cardButton('Remix', 'ghost', () => requestRemix(project.id)));
+  body.append(label, title, meta, copy, actions); card.appendChild(body); root.appendChild(card);
+}
+
+async function handleSharedRoute() {
+  const match = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]+)$/);
+  if (!match) return false;
+  document.querySelector('main').hidden = true; $('#sharedView').hidden = false;
+  try { const data = await apiJson(`/api/shared/${encodeURIComponent(match[1])}`); renderSharedProject(data.project); }
+  catch (error) { $('#sharedCard').textContent = error.message; }
+  return true;
+}
+
+async function restoreGuestDraft() {
+  try {
+    const raw = localStorage.getItem(GUEST_DRAFT_KEY); if (!raw) return;
+    const draft = JSON.parse(raw); await restoreProjectData(draft.projectData, draft.title || 'Untitled project');
+  } catch (_) { localStorage.removeItem(GUEST_DRAFT_KEY); }
+}
+
+async function loadDefaultChef() {
+  // An opening example, not a replacement for an existing draft or saved project.
+  const hasArtwork = () => colorSourceFile || sourceFile || currentProjectId || location.pathname.startsWith('/s/');
+  if (hasArtwork()) return;
+  try {
+    const response = await fetch('/static/examples/chef.png');
+    if (!response.ok) return;
+    const blob = await response.blob();
+    // A user may upload something while the example is loading.
+    if (hasArtwork()) return;
+    $('#colorPaletteSize').value = '5';
+    setWorkbenchMode('color');
+    workspace?.setPreview('regions');
+    await setColorSource(new File([blob], 'chef-example.png', { type: 'image/png' }), 'chef-example.png');
+  } catch (_) { /* Keep the normal upload state if the optional example is unavailable. */ }
+}
+
+async function bootstrapAccount() {
+  try { currentUser = (await apiJson('/api/auth/me')).user; } catch (_) { currentUser = null; }
+  renderAccount();
+  if (currentUser) await refreshProjects(); else await restoreGuestDraft();
+  await refreshCommunity();
+  await loadDefaultChef();
+}
+
+function renderPublishTags() {
+  const preview = $('#publishTagsPreview'); preview.replaceChildren();
+  parseTags($('#publishTags').value).forEach(tag => { const chip = el('span', 'tag'); chip.textContent = formatTags([tag]); preview.appendChild(chip); });
+}
+
+function initProductExperience() {
+  $('#headerCreate').addEventListener('click', () => $('#forge').scrollIntoView({ behavior: 'instant' }));
+  $('#signInBtn').addEventListener('click', () => openAuth(null));
+  $('#accountButton').addEventListener('click', async () => { await apiJson('/api/auth/logout', { method: 'POST' }); currentUser = null; currentProjectId = null; renderAccount(); await refreshCommunity(); });
+  $('#authForm').addEventListener('submit', handleAuthSubmit);
+  $('#authSwitch').addEventListener('click', () => { authMode = authMode === 'login' ? 'signup' : 'login'; renderAuthMode(); });
+  $('#authModal').querySelector('[data-close-auth]').addEventListener('click', closeAuth);
+  $('#publishModal').querySelector('[data-close-publish]').addEventListener('click', () => { $('#publishModal').hidden = true; });
+  $('#publishCancel').addEventListener('click', () => { $('#publishModal').hidden = true; });
+  $('#publishForm').addEventListener('submit', submitPublish);
+  $('#publishTags').addEventListener('input', renderPublishTags);
+  $('#saveProjectBtn').addEventListener('click', () => saveCurrentProject());
+  $('#shareProjectBtn').addEventListener('click', shareCurrentProject);
+  $('#publishProjectBtn').addEventListener('click', () => publishProject());
+  $('#newProjectBtn').addEventListener('click', clearProject);
+  $('#refreshCommunityBtn').addEventListener('click', refreshCommunity);
+  $('#projectTitle').addEventListener('input', scheduleProjectPersist);
+  document.addEventListener('input', (event) => { if (event.target.closest('#forge') && !event.target.closest('.modal')) scheduleProjectPersist(); });
+  document.addEventListener('change', (event) => { if (event.target.closest('#forge') && !event.target.closest('.modal')) scheduleProjectPersist(); });
+  window.addEventListener('beforeunload', persistGuestDraft);
+  productReady = true;
+  bootstrapAccount(); refreshCommunity(); handleSharedRoute();
+}
+
+initProductExperience();
 init();

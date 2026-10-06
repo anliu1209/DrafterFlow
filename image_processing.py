@@ -18,7 +18,7 @@ import sys
 import cv2
 import numpy as np
 
-IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 # Above this many separate foreground regions, warn that the background may not be
 # uniform (photographic clutter) — still proceeds, just flags it for inspection.
@@ -254,7 +254,7 @@ def extract_masks(
         raise ImageProcessingError(f"Error: File not found: {image_path}")
 
     if not image_path.lower().endswith(IMAGE_EXTS):
-        raise ImageProcessingError("Error: Please upload a PNG or JPG image.")
+        raise ImageProcessingError("Error: Please upload a PNG, JPG, or WEBP image.")
 
     img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if img is None:
